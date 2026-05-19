@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <rect width="256" height="256" rx="48" fill="#1a1a1a"/>
+  <!-- Folder body -->
+  <path d="M36 72h88l24 24h72c8 0 16 8 16 16v72c0 8-8 16-16 16H36c-8 0-16-8-16-16V88c0-8 8-16 16-16z" fill="#2d2d2d" stroke="#555" stroke-width="3"/>
+  <!-- Sound waves inside folder -->
+  <rect x="80" y="124" width="8" height="36" rx="4" fill="#888"/>
+  <rect x="96" y="116" width="8" height="52" rx="4" fill="#aaa"/>
+  <rect x="112" y="108" width="8" height="68" rx="4" fill="#fff"/>
+  <rect x="128" y="116" width="8" height="52" rx="4" fill="#aaa"/>
+  <rect x="144" y="124" width="8" height="36" rx="4" fill="#888"/>
+  <rect x="160" y="136" width="8" height="12" rx="4" fill="#666"/>
+  <!-- Folder tab -->
+  <path d="M36 72h88l24 24H36V72z" fill="#2d2d2d" stroke="#555" stroke-width="3"/>
+</svg>

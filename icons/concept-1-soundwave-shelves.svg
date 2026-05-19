@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <!-- Background -->
+  <rect width="256" height="256" rx="48" fill="#1a1a1a"/>
+  <!-- Sound wave bars arranged like library shelves -->
+  <rect x="40" y="60" width="16" height="136" rx="8" fill="#999"/>
+  <rect x="68" y="48" width="16" height="160" rx="8" fill="#bbb"/>
+  <rect x="96" y="36" width="16" height="184" rx="8" fill="#ddd"/>
+  <rect x="124" y="48" width="16" height="160" rx="8" fill="#bbb"/>
+  <rect x="152" y="60" width="16" height="136" rx="8" fill="#999"/>
+  <rect x="180" y="80" width="16" height="96" rx="8" fill="#777"/>
+  <rect x="208" y="96" width="16" height="64" rx="8" fill="#555"/>
+  <!-- Subtle glow on center bar -->
+  <rect x="96" y="36" width="16" height="184" rx="8" fill="url(#glow)" opacity="0.6"/>
+  <defs>
+    <linearGradient id="glow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff"/>
+      <stop offset="50%" stop-color="#aaa"/>
+      <stop offset="100%" stop-color="#fff"/>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <!-- Background -->
+  <rect width="256" height="256" rx="48" fill="#1a1a1a"/>
+
+  <!-- Folder tab -->
+  <path d="M38 72h72l18 18H38V72z" fill="#3a3a3a"/>
+  <path d="M38 72h72l18 18" stroke="#555" stroke-width="2" stroke-linejoin="round"/>
+
+  <!-- Folder body -->
+  <rect x="38" y="90" width="180" height="126" rx="8" fill="#2a2a2a" stroke="#4a4a4a" stroke-width="2"/>
+
+  <!-- Sound waves inside folder -->
+  <rect x="68" y="130" width="10" height="40" rx="5" fill="#777"/>
+  <rect x="86" y="118" width="10" height="64" rx="5" fill="#aaa"/>
+  <rect x="104" y="106" width="10" height="88" rx="5" fill="#fff"/>
+  <rect x="122" y="118" width="10" height="64" rx="5" fill="#aaa"/>
+  <rect x="140" y="130" width="10" height="40" rx="5" fill="#777"/>
+  <rect x="158" y="142" width="10" height="16" rx="5" fill="#555"/>
+
+  <!-- Subtle highlight on center bar -->
+  <rect x="104" y="106" width="10" height="88" rx="5" fill="url(#highlight)" opacity="0.5"/>
+
+  <defs>
+    <linearGradient id="highlight" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff" stop-opacity="0.8"/>
+      <stop offset="50%" stop-color="#fff" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#fff" stop-opacity="0.8"/>
+    </linearGradient>
+  </defs>
+</svg>

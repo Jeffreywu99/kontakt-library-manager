@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Icon Preview - Kontakt Library Manager</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #111;
+    color: #fff;
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
+    gap: 24px;
+  }
+  h1 { font-size: 20px; font-weight: 600; color: #aaa; margin-bottom: 8px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+    max-width: 600px;
+  }
+  .card {
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 12px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .card:hover { border-color: #666; background: #222; }
+  .card.selected { border-color: #fff; background: #282828; box-shadow: 0 0 20px rgba(255,255,255,0.08); }
+  .card img { width: 128px; height: 128px; border-radius: 24px; }
+  .card h3 { font-size: 14px; font-weight: 500; color: #ccc; }
+  .card p { font-size: 11px; color: #777; text-align: center; line-height: 1.5; }
+  .btn {
+    background: #fff;
+    color: #111;
+    border: none;
+    padding: 8px 24px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 8px;
+  }
+  .btn:hover { background: #ddd; }
+</style>
+</head>
+<body>
+
+<h1>Kontakt Library Manager — 图标方案</h1>
+<p style="color:#777;font-size:12px;margin-bottom:8px">点击选中你喜欢的方案</p>
+
+<div class="grid" id="grid">
+  <div class="card" onclick="select(this, 1)">
+    <img src="concept-1-soundwave-shelves.svg" alt="Soundwave Shelves">
+    <h3>方案 1 · 音波列阵</h3>
+    <p>音柱高低错落，像图书馆书架上的书脊，中间的亮柱象征当前选中项</p>
+  </div>
+  <div class="card" onclick="select(this, 2)">
+    <img src="concept-2-folder-audio.svg" alt="Folder Audio">
+    <h3>方案 2 · 文件夹 + 音波</h3>
+    <p>文件夹内藏音柱，表达"组织管理音频库"的含义，直观易懂</p>
+  </div>
+  <div class="card" onclick="select(this, 3)">
+    <img src="concept-3-geometric-k.svg" alt="Geometric K">
+    <h3>方案 3 · 几何 K</h3>
+    <p>抽象字母 K 结合音柱，品牌识别性强，现代科技感</p>
+  </div>
+  <div class="card" onclick="select(this, 4)">
+    <img src="concept-4-grid-blocks.svg" alt="Grid Blocks">
+    <h3>方案 4 · 网格 + 选中高亮</h3>
+    <p>九宫格表达库的集合，高亮方块中的音柱暗示"正在浏览的库"</p>
+  </div>
+</div>
+
+<button class="btn" onclick="confirmChoice()">确认选择</button>
+<p id="result" style="color:#4caf50;font-size:13px;margin-top:8px"></p>
+
+<script>
+let selected = null;
+function select(el, n) {
+  document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  selected = n;
+}
+function confirmChoice() {
+  if (!selected) { alert('请先点击一个方案'); return; }
+  document.getElementById('result').textContent = '已选择方案 ' + selected + '，通知开发者。';
+}
+</script>
+</body>
+</html>
