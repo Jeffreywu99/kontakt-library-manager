@@ -3,7 +3,9 @@
 Left: category/type panel | Center: library table | Right: patch details + notes + source info
 """
 
+import subprocess
 from pathlib import Path
+from datetime import datetime
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QTableWidget, QTableWidgetItem, QPushButton, QListWidget, QListWidgetItem,
@@ -19,6 +21,13 @@ from src.ui.add_dialog import AddLibraryDialog
 from src.ui.category_dialog import CategoryDialog
 from src.ui.folder_dialog import FolderDialog
 from src.ui.batch_add_dialog import BatchAddDialog
+
+def _ui_trace(msg: str) -> None:
+    try:
+        with open(Path.home() / "klm_debug.log", "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now().isoformat()}] [UI] {msg}\n")
+    except Exception:
+        pass
 
 TYPE_LABELS = {"standard": "标准", "nonstandard": "非标准", "registry": "注册"}
 TYPE_LABELS_FULL = {"standard": "标准库", "nonstandard": "非标准库", "registry": "注册库"}
@@ -211,10 +220,12 @@ class MainWindow(QMainWindow):
     # ====== Event Handlers ======
 
     def _on_initial_load(self):
+        _ui_trace("_on_initial_load start")
         try:
             self._manager.refresh()
-        except Exception:
-            pass
+            _ui_trace(f"_on_initial_load refresh OK: {len(self._manager.libraries)} libs")
+        except Exception as e:
+            _ui_trace(f"_on_initial_load refresh ERROR: {e}")
         self._refresh_category_list()
         self._refresh_table()
         self._admin_label.setText("管理员模式")
@@ -484,18 +495,22 @@ class MainWindow(QMainWindow):
     def _on_batch_add(self):
         dlg = BatchAddDialog(self._manager, self)
         if dlg.exec() == BatchAddDialog.Accepted:
-            self._manager.refresh()
             self._refresh_category_list()
             self._refresh_table()
             self._status_label.setText("批量入库完成")
 
     def _on_add(self):
+        _ui_trace("_on_add start")
         dlg = AddLibraryDialog(self)
         if dlg.exec() != AddLibraryDialog.Accepted:
+            _ui_trace("_on_add: dialog cancelled")
             return
+        _ui_trace(f"_on_add: name={dlg.library_name()!r} folder={dlg.library_folder()!r}")
         try:
             self._manager.add_library(dlg.library_name(), dlg.library_folder(), dlg.library_snpid())
+            _ui_trace("_on_add: manager.add_library OK")
         except LibraryManagerError as e:
+            _ui_trace(f"_on_add FAIL: {e}")
             QMessageBox.critical(self, "添加失败", str(e))
             if e.details:
                 detail_text = "\n".join(f"  {k}: {v}" for k, v in e.details.items())
@@ -508,10 +523,12 @@ class MainWindow(QMainWindow):
     def _on_remove(self):
         selected = self._table.currentRow()
         if selected < 0:
+            _ui_trace("_on_remove: no row selected")
             QMessageBox.information(self, "提示", "请先选择一个要移除的音色库。")
             return
         name_item = self._table.item(selected, 0)
         name = name_item.text()
+        _ui_trace(f"_on_remove: name={name!r}")
         reply = QMessageBox.question(
             self, "确认移除",
             f"将移除 '{name}' 的注册信息。\n\n"
@@ -519,10 +536,13 @@ class MainWindow(QMainWindow):
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         )
         if reply != QMessageBox.Yes:
+            _ui_trace("_on_remove: user cancelled")
             return
         try:
             self._manager.remove_library(name)
+            _ui_trace("_on_remove: manager.remove_library OK")
         except LibraryManagerError as e:
+            _ui_trace(f"_on_remove FAIL: {e}")
             QMessageBox.critical(self, "移除失败", str(e))
             return
         self._refresh_category_list()
@@ -562,12 +582,15 @@ class MainWindow(QMainWindow):
             return
         errors = []
         success = []
+        _ui_trace(f"_on_batch_remove: names={names}")
         for name in names:
             try:
                 self._manager.remove_library(name)
                 success.append(name)
             except LibraryManagerError as e:
+                _ui_trace(f"_on_batch_remove FAIL '{name}': {e}")
                 errors.append(f"{name}: {e}")
+        _ui_trace(f"_on_batch_remove done: success={len(success)} fail={len(errors)}")
         self._refresh_category_list()
         self._refresh_table()
         self._patch_tree.clear()

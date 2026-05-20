@@ -5,12 +5,21 @@ The UI layer talks only to this class. Pure Python — no Qt imports.
 
 import logging
 from pathlib import Path
+from datetime import datetime
 from src.models import LibraryEntry, PatchEntry
 from src.scanner import scan_all, scan_patches
 from src.registry import (
     add_library as reg_add, remove_library as reg_remove, is_admin,
+    list_libraries as list_registry_libraries,
 )
-from src.files import create_xml, create_json, remove_xml, remove_json
+
+def _trace(msg: str) -> None:
+    try:
+        with open(Path.home() / "klm_debug.log", "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now().isoformat()}] {msg}\n")
+    except Exception:
+        pass
+from src.files import create_xml, create_json, remove_xml, remove_json, list_from_xml, list_from_json
 from src.storage import (
     get_library_roots,
     add_library_root,
@@ -131,73 +140,146 @@ class LibraryManager:
                 results[name] = "success"
             except LibraryManagerError as e:
                 results[name] = f"error: {e}"
-        self.refresh()
         return results
 
     def add_library(self, name: str, folder_path: str, snpid: str = "") -> LibraryEntry:
+        _trace(f"add_library ENTER: name={name!r} folder={folder_path!r} snpid={snpid!r}")
         if not name.strip():
+            _trace("add_library FAIL: empty name")
             raise LibraryManagerError("库名称不能为空。")
         name = name.strip()
         folder = Path(folder_path)
         if not folder.is_dir():
+            _trace(f"add_library FAIL: folder not found: {folder_path}")
             raise LibraryManagerError(f"文件夹不存在: {folder_path}")
         if not is_admin():
+            _trace("add_library FAIL: not admin")
             raise LibraryManagerError("需要管理员权限才能添加音色库。请以管理员身份运行。")
 
         existing = self.get_library(name)
-        if existing is not None:
-            raise LibraryManagerError(f"音色库 '{name}' 已经存在。")
+        if existing is not None and (existing.found_in_registry or existing.found_in_xml or existing.found_in_json):
+            _trace(f"add_library FAIL: already registered: {existing}")
+            raise LibraryManagerError(f"音色库 '{name}' 已注册在 Kontakt 中。")
 
         folder_str = str(folder)
-        details: dict = {}
         try:
             reg_add(name, folder_str)
-            details["registry"] = "created"
+            _trace("add_library: reg_add OK")
         except OSError as e:
+            _trace(f"add_library FAIL: reg_add error: {e}")
             raise LibraryManagerError(f"注册表写入失败: {e}")
 
         try:
             create_xml(name, folder_str, snpid)
-            details["xml"] = "created"
+            _trace("add_library: create_xml OK")
         except OSError as e:
-            raise LibraryManagerError(
-                f"XML 文件创建失败（注册表已写入，请手动清理）。\n{e}",
-                details=details,
-            )
+            _trace(f"add_library FAIL: create_xml error: {e}")
+            raise LibraryManagerError(f"XML 文件创建失败（注册表已写入，请手动清理）。\n{e}")
 
         try:
             create_json(name, folder_str)
-            details["json"] = "created"
+            _trace("add_library: create_json OK")
         except OSError as e:
-            raise LibraryManagerError(
-                f"JSON 文件创建失败（注册表和 XML 已写入）。\n{e}",
-                details=details,
-            )
+            _trace(f"add_library FAIL: create_json error: {e}")
+            raise LibraryManagerError(f"JSON 文件创建失败（注册表和 XML 已写入）。\n{e}")
 
-        self.refresh()
-        entry = self.get_library(name)
-        if entry is None:
-            raise LibraryManagerError(f"添加后未能找到库 '{name}'，请检查。")
+        # Read back registration metadata (fast — no folder scan)
+        _, reg_sources = list_registry_libraries()
+        xml_data, xml_sources = list_from_xml()
+        json_data, json_sources = list_from_json()
+        registry_paths = reg_sources.get(name, [])
+        xml_path = xml_sources.get(name, "")
+        json_path = json_sources.get(name, "")
+
+        folder_norm = str(folder.resolve())
+        existing_idx = None
+        for i, lib in enumerate(self._libraries):
+            try:
+                if str(Path(lib.content_dir).resolve()) == folder_norm:
+                    existing_idx = i
+                    break
+            except Exception:
+                pass
+
+        if existing_idx is not None:
+            lib = self._libraries[existing_idx]
+            lib.found_in_registry = True
+            lib.found_in_xml = True
+            lib.found_in_json = True
+            lib.registry_paths = registry_paths
+            lib.xml_path = xml_path
+            lib.json_path = json_path
+            lib.snpid = snpid or lib.snpid
+            _trace(f"add_library SUCCESS (merged): {lib}")
+            return lib
+
+        entry = LibraryEntry(
+            name=name, content_dir=folder_str, snpid=snpid,
+            found_in_registry=True, found_in_xml=True, found_in_json=True,
+            exists_on_disk=True, is_kontakt_library=True,
+            library_type="registry",
+            categories=get_library_categories(name),
+            notes=get_library_notes(name), hidden=False,
+            registry_paths=registry_paths,
+            xml_path=xml_path, json_path=json_path,
+        )
+        self._libraries.append(entry)
+        self._libraries.sort(key=lambda e: e.name.lower())
+        _trace(f"add_library SUCCESS (new): {entry}")
         return entry
 
     def remove_library(self, name: str) -> dict:
+        _trace(f"remove_library ENTER: name={name!r}")
         if not name.strip():
+            _trace("remove_library FAIL: empty name")
             raise LibraryManagerError("库名称不能为空。")
         if not is_admin():
+            _trace("remove_library FAIL: not admin")
             raise LibraryManagerError("需要管理员权限才能移除音色库。请以管理员身份运行。")
+
+        # Look up stored paths (may differ from name-derived paths)
+        lib = self.get_library(name)
+        xml_path = lib.xml_path if lib else ""
+        json_path = lib.json_path if lib else ""
 
         results: dict = {}
         failed_reg = reg_remove(name)
+        _trace(f"remove_library: reg_remove failed={failed_reg}")
         results["registry"] = len(failed_reg) == 0
-        results["xml"] = remove_xml(name)
-        results["json"] = remove_json(name)
+
+        # Delete using stored paths (handles name mismatches)
+        if xml_path:
+            try:
+                Path(xml_path).unlink(missing_ok=True)
+                results["xml"] = True
+                _trace(f"remove_library: deleted xml by path: {xml_path}")
+            except OSError:
+                results["xml"] = False
+        # Always also try name-derived path as fallback
+        if not xml_path or not results.get("xml"):
+            results["xml"] = remove_xml(name)
+
+        if json_path:
+            try:
+                Path(json_path).unlink(missing_ok=True)
+                results["json"] = True
+                _trace(f"remove_library: deleted json by path: {json_path}")
+            except OSError:
+                results["json"] = False
+        # Always also try name-derived path as fallback
+        if not json_path or not results.get("json"):
+            results["json"] = remove_json(name)
+
+        _trace(f"remove_library results: {results}")
 
         set_library_categories(name, [])
         set_library_notes(name, "")
         clear_patch_cache(name)
         self._patches_cache.pop(name, None)
 
-        self.refresh()
+        # Remove from in-memory list
+        self._libraries = [l for l in self._libraries if l.name.lower() != name.lower()]
+        _trace(f"remove_library: in-memory remove done, libraries: {len(self._libraries)}")
         return results
 
     def get_library(self, name: str) -> LibraryEntry | None:

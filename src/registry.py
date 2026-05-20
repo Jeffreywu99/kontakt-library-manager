@@ -43,28 +43,43 @@ def list_libraries() -> tuple:
 
 
 def add_library(name: str, content_dir: str) -> None:
+    success_count = 0
     last_error = None
     for base_key, reg_path, _ in REG_ENTRIES:
         try:
             with winreg.CreateKey(base_key, f"{reg_path}\\{name}") as key:
                 winreg.SetValueEx(key, VALUE_NAME, 0, winreg.REG_SZ, content_dir)
+            success_count += 1
         except OSError as e:
             last_error = e
-    if last_error:
+    if success_count == 0:
         raise OSError(
             f"无法写入注册表。请确认以管理员身份运行。\n{last_error}"
         )
+
+
+def _delete_key_recursive(base_key: int, sub_path: str) -> None:
+    """Delete a registry key and all its subkeys recursively."""
+    try:
+        with winreg.OpenKey(base_key, sub_path, 0, winreg.KEY_READ | winreg.KEY_WRITE) as key:
+            while True:
+                try:
+                    child_name = winreg.EnumKey(key, 0)
+                    _delete_key_recursive(base_key, f"{sub_path}\\{child_name}")
+                except OSError:
+                    break
+    except OSError:
+        return
+    winreg.DeleteKey(base_key, sub_path)
 
 
 def remove_library(name: str) -> list[str]:
     failed: list[str] = []
     for base_key, reg_path, prefix in REG_ENTRIES:
         try:
-            winreg.DeleteKey(base_key, f"{reg_path}\\{name}")
+            _delete_key_recursive(base_key, f"{reg_path}\\{name}")
         except OSError:
             pass
-        else:
-            continue
         try:
             with winreg.OpenKey(base_key, f"{reg_path}\\{name}", 0, winreg.KEY_READ):
                 failed.append(f"{prefix}\\{reg_path}\\{name}")
