@@ -217,11 +217,12 @@ class LibraryManager:
 
         # Also clean HKCU display entries for deleted libraries
         try:
-            known = set(lib.name for lib in self._libraries if lib.found_in_registry)
+            known = set(lib.name for lib in self._libraries)
             hkcu_count = reg_cleanup_hkcu(known)
-            success += hkcu_count
-        except Exception:
-            pass
+            if hkcu_count:
+                success += hkcu_count
+        except Exception as e:
+            logger.warning(f"HKCU cleanup failed: {e}")
 
         self.refresh()
         return success, fail

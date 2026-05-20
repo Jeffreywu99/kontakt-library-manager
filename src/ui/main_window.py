@@ -598,21 +598,45 @@ class MainWindow(QMainWindow):
         self._status_label.setText(msg)
 
     def _on_cleanup_stale(self):
-        stale = self._manager.find_stale_registry_entries()
-        if not stale:
-            QMessageBox.information(self, "清理残留", "未发现残留注册表项。所有已注册的库文件均存在。")
+        from src.registry import list_hkcu_display_entries
+
+        # Phase 1: stale registry (ContentDir exists in reg but files gone)
+        stale_reg = self._manager.find_stale_registry_entries()
+
+        # Phase 2: orphaned HKCU display entries
+        known = set(lib.name for lib in self._manager.libraries if lib.found_in_registry)
+        hkcu_all = list_hkcu_display_entries()
+        stale_hkcu = [e for e in hkcu_all if e not in known]
+
+        total = len(stale_reg) + len(stale_hkcu)
+        if total == 0:
+            QMessageBox.information(self, "清理残留", "未发现残留。所有注册项均干净。")
             return
-        names_display = "\n".join(f"  - {lib.name}" for lib in stale[:20])
-        extra = f"\n  ... 还有 {len(stale) - 20} 个" if len(stale) > 20 else ""
+
+        lines = []
+        if stale_reg:
+            lines.append(f"注册表残留（硬盘文件已删除）: {len(stale_reg)} 个")
+            for lib in stale_reg[:10]:
+                lines.append(f"  - {lib.name}")
+            if len(stale_reg) > 10:
+                lines.append(f"  ... 还有 {len(stale_reg) - 10} 个")
+        if stale_hkcu:
+            if lines:
+                lines.append("")
+            lines.append(f"HKCU 残留（显示偏好，库已不存在）: {len(stale_hkcu)} 个")
+            for name in stale_hkcu[:10]:
+                lines.append(f"  - {name}")
+            if len(stale_hkcu) > 10:
+                lines.append(f"  ... 还有 {len(stale_hkcu) - 10} 个")
+
         reply = QMessageBox.question(
             self, "确认清理",
-            f"发现 {len(stale)} 个残留注册表项（硬盘文件已不存在）：\n\n"
-            f"{names_display}{extra}\n\n"
-            "将删除这些库的所有注册表项、XML 和 JSON 文件。\n确定清理？",
+            f"发现 {total} 个残留项：\n\n" + "\n".join(lines) + "\n\n确定清理？",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         )
         if reply != QMessageBox.Yes:
             return
+
         success, fail = self._manager.cleanup_stale_entries()
         self._refresh_category_list()
         self._refresh_table()
