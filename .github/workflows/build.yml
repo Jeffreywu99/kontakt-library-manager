@@ -1,0 +1,40 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install PySide6 pyinstaller
+
+      - name: Build EXE
+        run: pyinstaller --onefile --windowed --icon=icons/kontakt-library-manager.ico --name=KontaktLibraryManager --add-data="src;src" --hidden-import=PySide6.QtSvg --uac-admin main.pyw
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Build Installer
+        run: iscc setup.iss
+
+      - name: Rename artifacts
+        run: |
+          move dist\KontaktLibraryManager.exe dist\KontaktLibraryManager-Portable-${{ github.ref_name }}.exe
+          move dist\KontaktLibraryManager-Setup-*.exe dist\KontaktLibraryManager-Setup-${{ github.ref_name }}.exe
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.exe
+          generate_release_notes: true
