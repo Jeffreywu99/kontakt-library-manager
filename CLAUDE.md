@@ -39,7 +39,33 @@ kontakt-library-manager/
 - **分层**：UI (PySide6) → Manager (纯 Python) → Scanner / Registry / Files / Storage
 - **数据流**：Scanner 扫描用户文件夹 → Manager 缓存 → UI 展示
 - **本地存储**：`%APPDATA%\KontaktLibraryManager\data.json`，独立于 Kontakt
-- **库来源**：仅用户指定的文件夹（标准 + 非标准），不扫描注册表
+- **库来源**：用户指定的文件夹 + 注册表 + XML + JSON（始终扫描，无条件）
+
+## 当前状态（2026-05-21 commit 08a9823）
+
+分支 `v0.2.0`，版本号 0.2.1 WIP。
+
+### v0.2.0 引入的回归（已部分修复）
+
+v0.2.0 删除了 `scan_all()` 中的注册表/XML/JSON 扫描 → 入库/删除完全失效。
+已在 commit `08a9823` 中恢复，但用户反馈仍然不行。
+
+### 关键文件当前状态
+
+- **scanner.py**: 恢复 `_scan_registry_libraries()`，`scan_all()` 无条件扫描全部 4 个来源（文件夹+注册表+XML+JSON），有路径去重和注册信息融合
+- **registry.py**: `add_library()` 3 个位置全失败才报错；`remove_library()` 使用递归删除 `_delete_key_recursive()`
+- **manager.py**: `add_library()`/`remove_library()` 不再内部调用慢速 `refresh()`，改为直接操作 `_libraries` 内存列表；`remove_library()` 用存储的精确 json_path/xml_path 删文件
+- **main_window.py**: 补回 `import subprocess`；批量操作去掉冗余 refresh
+
+### 调试日志
+
+程序运行时会写 `%USERPROFILE%\klm_debug.log`（即 `C:\Users\Jeffrey\klm_debug.log`），记录每次 add/remove 的完整执行路径。
+
+### 已知未解决问题
+
+1. Native Access 创建的 JSON 文件名与库名不一致（如 "In Session Audio Taiko Creator" 的 JSON 叫 "Taiko Creator.json"），可能导致删除残留
+2. 用户反馈入库"没有任何反应"、删除旧库后 Kontakt 里仍在，原因待确认
+3. `dist/KontaktLibraryManager.exe` 是 64-bit PyInstaller 打包，含 UAC 提权
 
 ## 关键常量
 
