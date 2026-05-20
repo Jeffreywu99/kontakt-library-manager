@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.0] - 2026-05-21
+
+### Changed
+- **核心架构重构**："入库即显示，删除即消失"
+  - 主列表只显示已注册的库（有注册表/XML/JSON 记录）
+  - 删除类型概念（标准库/非标准库/注册库）
+  - 删除隐藏功能
+  - 入库时自动把父目录加入库文件夹列表
+- **UI 简化**：
+  - 左侧面板：全部 / 用户分类 / 未分类
+  - 表格删除"类型"列
+  - 文件夹管理对话框简化为单一列表
+- **数据模型简化**：
+  - `LibraryEntry` 删除 `library_type` 和 `hidden` 字段
+  - `data.json` 删除 `custom_libraries`、`hidden_libraries`、`show_registry_libraries`
+
+### Fixed
+- **入库"可见但不可用"问题**：使用 .nicnt 中的 `RegKey` 作为注册表键名，而非文件夹名
+  - 之前：文件夹名 `Tina Guo vol 2` → 注册表键名 `Tina Guo vol 2`（错误）
+  - 现在：.nicnt `RegKey` = `Artist Series - Tina Guo vol 2` → 注册表键名正确
+
 ## [0.2.1] - 2026-05-20
 
 ### Fixed

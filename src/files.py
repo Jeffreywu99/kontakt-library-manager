@@ -14,13 +14,26 @@ JSON_DIR = Path(r"C:\Users\Public\Documents\Native Instruments\installed_product
 
 XML_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 <ProductHints>
-    <Product version="1">
-        <UPID>{upid}</UPID>
-        <Name>{name}</Name>
-        <RegKey>{name}</RegKey>
-        <SNPID>{snpid}</SNPID>
-        <ContentDir>{content_dir}</ContentDir>
-    </Product>
+  <Product version="3">
+    <UPID>{upid}</UPID>
+    <Name>{name}</Name>
+    <Type>Content</Type>
+    <RegKey>{name}</RegKey>
+    <SNPID>{snpid}</SNPID>
+    <AuthSystem>{auth_system}</AuthSystem>
+    <Relevance>
+      <Application minVersion="5" nativeContent="true">Kontakt</Application>
+    </Relevance>
+    <PoweredBy>{powered_by}</PoweredBy>
+    <Visibility>0x07</Visibility>
+    <ProductSpecific>
+      <HU>{hu}</HU>
+      <JDX>{jdx}</JDX>
+      <Visibility type="Number">3</Visibility>
+    </ProductSpecific>
+    <Company>{company}</Company>
+    <ContentDir>{content_dir}</ContentDir>
+  </Product>
 </ProductHints>"""
 
 SANITIZE_CHARS = str.maketrans({c: "_" for c in '<>:"/\\|?*'})
@@ -74,7 +87,7 @@ def list_from_json() -> tuple[dict[str, dict], dict[str, str]]:
             entry: dict = {"snpid": data.get("SNPID", ""), "content_dir": ""}
             cd = data.get("ContentDir", data.get("content_dir", ""))
             if cd:
-                entry["content_dir"] = cd.replace("\\\\", "\\")
+                entry["content_dir"] = cd
             result[name] = entry
             sources[name] = str(json_file)
         except (json.JSONDecodeError, OSError):
@@ -82,28 +95,40 @@ def list_from_json() -> tuple[dict[str, dict], dict[str, str]]:
     return result, sources
 
 
-def create_xml(name: str, content_dir: str, snpid: str = "") -> Path:
+def create_xml(name: str, content_dir: str, snpid: str = "",
+               upid: str = "", hu: str = "", jdx: str = "",
+               company: str = "", auth_system: str = "",
+               powered_by: str = "") -> Path:
     XML_DIR.mkdir(parents=True, exist_ok=True)
     safe_name = _safe_filename(name)
     xml_path = XML_DIR / f"{safe_name}.xml"
-    upid = snpid if snpid else name
     xml_content = XML_TEMPLATE.format(
-        upid=upid, name=name, snpid=snpid, content_dir=content_dir
+        upid=upid or snpid or name,
+        name=name,
+        snpid=snpid or "000",
+        auth_system=auth_system or "RAS2",
+        powered_by=powered_by or "Kontakt",
+        hu=hu or "0" * 32,
+        jdx=jdx or "0" * 64,
+        company=company or "Unknown",
+        content_dir=content_dir,
     )
     with open(xml_path, "w", encoding="utf-8") as f:
         f.write(xml_content)
     return xml_path
 
 
-def create_json(name: str, content_dir: str) -> Path:
+def create_json(name: str, content_dir: str, snpid: str = "") -> Path:
     JSON_DIR.mkdir(parents=True, exist_ok=True)
     json_path = JSON_DIR / f"{name}.json"
+    data: dict = {
+        "ContentDir": content_dir,
+        "ContentVersion": "1.0.0",
+    }
+    if snpid:
+        data["SNPID"] = snpid
     with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(
-            {"Name": name, "ContentDir": content_dir.replace("\\", "\\\\")},
-            f,
-            indent=4,
-        )
+        json.dump(data, f, indent=4, ensure_ascii=False)
     return json_path
 
 
@@ -124,3 +149,23 @@ def remove_json(name: str) -> bool:
         return True
     except OSError:
         return False
+
+
+def find_json_by_content_dir(content_dir: str) -> str:
+    """Find JSON file whose ContentDir matches the given path.
+
+    Returns the file path of the matching JSON, or empty string.
+    """
+    target = str(Path(content_dir).resolve()).lower() if content_dir else ""
+    if not target or not JSON_DIR.is_dir():
+        return ""
+    for json_file in JSON_DIR.glob("*.json"):
+        try:
+            with open(json_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            cd = data.get("ContentDir", data.get("content_dir", ""))
+            if cd and str(Path(cd).resolve()).lower() == target:
+                return str(json_file)
+        except (json.JSONDecodeError, OSError):
+            continue
+    return ""

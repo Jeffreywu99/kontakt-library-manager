@@ -1,6 +1,6 @@
 """MainWindow: primary application window.
 
-Left: category/type panel | Center: library table | Right: patch details + notes + source info
+Left: category panel | Center: library table | Right: patch details + notes + source info
 """
 
 import subprocess
@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QTableWidget, QTableWidgetItem, QPushButton, QListWidget, QListWidgetItem,
     QStatusBar, QLabel, QMessageBox, QHeaderView, QTreeWidget, QTreeWidgetItem,
-    QTextEdit, QMenu, QAbstractItemView, QScrollArea, QFrame, QCheckBox,
+    QTextEdit, QMenu, QAbstractItemView, QScrollArea, QFrame,
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction
@@ -22,15 +22,13 @@ from src.ui.category_dialog import CategoryDialog
 from src.ui.folder_dialog import FolderDialog
 from src.ui.batch_add_dialog import BatchAddDialog
 
+
 def _ui_trace(msg: str) -> None:
     try:
         with open(Path.home() / "klm_debug.log", "a", encoding="utf-8") as f:
             f.write(f"[{datetime.now().isoformat()}] [UI] {msg}\n")
     except Exception:
         pass
-
-TYPE_LABELS = {"standard": "标准", "nonstandard": "非标准", "registry": "注册"}
-TYPE_LABELS_FULL = {"standard": "标准库", "nonstandard": "非标准库", "registry": "注册库"}
 
 
 class MainWindow(QMainWindow):
@@ -90,16 +88,11 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self._folder_btn)
 
         self._refresh_btn = QPushButton("刷新")
-        self._refresh_btn.setToolTip("重新扫描所有库文件夹")
+        self._refresh_btn.setToolTip("重新扫描所有注册信息")
         self._refresh_btn.clicked.connect(self._on_refresh)
         toolbar.addWidget(self._refresh_btn)
 
         toolbar.addStretch()
-
-        self._show_hidden_cb = QCheckBox("显示已隐藏")
-        self._show_hidden_cb.stateChanged.connect(self._refresh_table)
-        toolbar.addWidget(self._show_hidden_cb)
-
         main_layout.addLayout(toolbar)
 
         splitter = QSplitter(Qt.Horizontal)
@@ -118,8 +111,8 @@ class MainWindow(QMainWindow):
         splitter.addWidget(left_panel)
 
         # Center: Library table
-        self._table = QTableWidget(0, 5)
-        self._table.setHorizontalHeaderLabels(["名称", "路径", "存在", "类型", "分类"])
+        self._table = QTableWidget(0, 4)
+        self._table.setHorizontalHeaderLabels(["名称", "路径", "存在", "分类"])
         self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -133,9 +126,7 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(2, QHeaderView.Fixed)
         header.resizeSection(2, 40)
         header.setSectionResizeMode(3, QHeaderView.Fixed)
-        header.resizeSection(3, 60)
-        header.setSectionResizeMode(4, QHeaderView.Fixed)
-        header.resizeSection(4, 70)
+        header.resizeSection(3, 90)
         self._table.verticalHeader().setDefaultSectionSize(28)
         splitter.addWidget(self._table)
 
@@ -236,21 +227,10 @@ class MainWindow(QMainWindow):
         self._category_list.clear()
         libs = self._manager.libraries
 
-        std_count = sum(1 for l in libs if l.library_type == "standard" and not l.hidden)
-        ns_count = sum(1 for l in libs if l.library_type == "nonstandard" and not l.hidden)
-        hidden_count = sum(1 for l in libs if l.hidden)
-
-        self._all_item = QListWidgetItem(f"全部 ({std_count + ns_count})")
+        total_count = len(libs)
+        self._all_item = QListWidgetItem(f"全部 ({total_count})")
         self._all_item.setData(Qt.UserRole, "")
         self._category_list.addItem(self._all_item)
-
-        std_item = QListWidgetItem(f"标准库 ({std_count})")
-        std_item.setData(Qt.UserRole, "[[standard]]")
-        self._category_list.addItem(std_item)
-
-        ns_item = QListWidgetItem(f"非标准库 ({ns_count})")
-        ns_item.setData(Qt.UserRole, "[[nonstandard]]")
-        self._category_list.addItem(ns_item)
 
         cats = self._manager.list_categories()
         for cat in cats:
@@ -259,32 +239,19 @@ class MainWindow(QMainWindow):
             item.setData(Qt.UserRole, cat["name"])
             self._category_list.addItem(item)
 
-        uncategorized = sum(1 for l in libs if not l.categories and not l.hidden)
+        uncategorized = sum(1 for l in libs if not l.categories)
         uncat_item = QListWidgetItem(f"  未分类 ({uncategorized})")
         uncat_item.setData(Qt.UserRole, "__uncategorized__")
         self._category_list.addItem(uncat_item)
-
-        if hidden_count > 0 or self._show_hidden_cb.isChecked():
-            hid_item = QListWidgetItem(f"隐藏的库 ({hidden_count})")
-            hid_item.setData(Qt.UserRole, "[[hidden]]")
-            self._category_list.addItem(hid_item)
 
         self._category_list.setCurrentRow(0)
         self._category_list.blockSignals(False)
 
     def _filtered_libraries(self) -> list[LibraryEntry]:
         libs = self._manager.libraries
-        if not self._show_hidden_cb.isChecked():
-            libs = [l for l in libs if not l.hidden]
         if self._category_list.currentItem():
             raw = self._category_list.currentItem().data(Qt.UserRole)
-            if raw.startswith("[[") and raw.endswith("]]"):
-                type_filter = raw[2:-2]
-                if type_filter == "hidden":
-                    libs = [l for l in libs if l.hidden]
-                else:
-                    libs = [l for l in libs if l.library_type == type_filter and not l.hidden]
-            elif raw == "__uncategorized__":
+            if raw == "__uncategorized__":
                 libs = [l for l in libs if not l.categories]
             elif raw:
                 libs = [l for l in libs if raw in l.categories]
@@ -300,12 +267,10 @@ class MainWindow(QMainWindow):
             exists_item = QTableWidgetItem("是" if lib.exists_on_disk else "否")
             exists_item.setForeground(Qt.green if lib.exists_on_disk else Qt.red)
             self._table.setItem(row, 2, exists_item)
-            type_item = QTableWidgetItem(TYPE_LABELS.get(lib.library_type, lib.library_type))
-            self._table.setItem(row, 3, type_item)
-            self._table.setItem(row, 4, QTableWidgetItem(", ".join(lib.categories)))
+            self._table.setItem(row, 3, QTableWidgetItem(", ".join(lib.categories)))
         total = len(self._manager.libraries)
         shown = len(libs)
-        self._status_label.setText(f"显示 {shown} 个库（共 {total} 个）")
+        self._status_label.setText(f"显示 {shown} 个库（共 {total} 个已注册）")
 
     def _on_category_changed(self):
         self._refresh_table()
@@ -330,10 +295,9 @@ class MainWindow(QMainWindow):
             size_str = f"{folder_size/1024:.1f} GB"
         else:
             size_str = f"{folder_size:.0f} MB"
-        lib_type = TYPE_LABELS_FULL.get(lib.library_type, lib.library_type)
         info_lines = [
             f"<b style='color:#fff'>{lib.name}</b>",
-            f"<span style='color:#999;'>类型: {lib_type} · 音色数: {len(patches)} 个 · 大小: {size_str}</span>",
+            f"<span style='color:#999;'>音色数: {len(patches)} 个 · 大小: {size_str}</span>",
             f"<span style='color:#999;'>路径: {lib.content_dir}</span>",
         ]
         if not lib.exists_on_disk:
@@ -388,13 +352,10 @@ class MainWindow(QMainWindow):
         if lib.found_in_json and lib.json_path:
             lines.append(f"JSON: {lib.json_path}")
         if not lines:
-            if lib.library_type in ("standard", "nonstandard"):
-                self._source_info.setText(f"来源: 用户指定的{TYPE_LABELS.get(lib.library_type, '')}文件夹")
-            else:
-                self._source_info.setText("来源: 未知")
+            self._source_info.setText("来源: 未知")
         else:
             self._source_info.setText("\n".join(lines))
-        if not lib.is_kontakt_library and lib.library_type != "nonstandard":
+        if not lib.is_kontakt_library:
             self._source_info.setText(
                 self._source_info.text() + "\n\n⚠ 此条目不是 Kontakt 音色库（无 .nicnt/.nki/.nkx 文件）"
             )
@@ -647,17 +608,6 @@ class MainWindow(QMainWindow):
             cat_menu.addAction(action)
         menu.addMenu(cat_menu)
 
-        # Hide / Unhide
-        menu.addSeparator()
-        if lib and lib.hidden:
-            unhide_action = QAction("取消隐藏", self)
-            unhide_action.triggered.connect(lambda: self._unhide_library(lib_name))
-            menu.addAction(unhide_action)
-        else:
-            hide_action = QAction("隐藏此库", self)
-            hide_action.triggered.connect(lambda: self._hide_library(lib_name))
-            menu.addAction(hide_action)
-
         # View source
         if lib and (lib.found_in_registry or lib.content_dir):
             source_menu = QMenu("查看来源", self)
@@ -708,24 +658,8 @@ class MainWindow(QMainWindow):
         self._refresh_category_list()
         self._refresh_table()
 
-    def _hide_library(self, lib_name: str):
-        self._manager.hide_library(lib_name)
-        self._refresh_category_list()
-        self._refresh_table()
-        self._status_label.setText(f"已隐藏 '{lib_name}'")
-
-    def _unhide_library(self, lib_name: str):
-        self._manager.unhide_library(lib_name)
-        self._refresh_category_list()
-        self._refresh_table()
-        self._status_label.setText(f"已取消隐藏 '{lib_name}'")
-
     def _on_manage_categories(self):
         dlg = CategoryDialog(self._manager, self)
         dlg.exec()
         self._refresh_category_list()
         self._refresh_table()
-
-    # ====== Helpers ======
-
-

@@ -1,19 +1,61 @@
-"""扫描所有数据源并合并为统一库列表。"""
+"""扫描所有数据源，只返回已注册的库。
 
+核心理念：入库即显示，删除即消失。
+只显示在注册表/XML/JSON 中有记录的库。
+"""
+
+import re
 from pathlib import Path
 from src.models import LibraryEntry, PatchEntry
 from src.registry import list_libraries as list_registry_libraries
 from src.files import list_from_xml, list_from_json
 from src.storage import (
-    get_library_roots,
-    get_custom_libraries,
+    get_library_folders,
     get_library_categories,
     get_library_notes,
     get_patch_notes,
     get_patch_cache,
     set_patch_cache,
-    is_hidden,
 )
+
+
+def _extract_nicnt_info(folder: Path) -> dict:
+    """Extract metadata from .nicnt file in the library folder.
+
+    Returns dict with keys: snpid, upid, hu, jdx, company, auth_system, powered_by, regkey, name.
+    Missing fields are empty strings.
+    """
+    result = {
+        "snpid": "", "upid": "", "hu": "", "jdx": "",
+        "company": "", "auth_system": "", "powered_by": "",
+        "regkey": "", "name": "",
+    }
+    for nicnt in folder.glob("*.nicnt"):
+        try:
+            data = nicnt.read_bytes()
+            start = data.find(b"<?xml")
+            if start < 0:
+                start = data.find(b"<ProductHints")
+            if start < 0:
+                continue
+            end = data.find(b"</ProductHints>", start)
+            if end < 0:
+                continue
+            xml_text = data[start:end + len(b"</ProductHints>")].decode("utf-8", errors="replace")
+            for tag, key in [
+                ("SNPID", "snpid"), ("UPID", "upid"),
+                ("HU", "hu"), ("JDX", "jdx"),
+                ("Company", "company"), ("AuthSystem", "auth_system"),
+                ("PoweredBy", "powered_by"), ("RegKey", "regkey"),
+                ("Name", "name"),
+            ]:
+                m = re.search(f"<{tag}[^>]*>(.*?)</{tag}>", xml_text)
+                if m and m.group(1).strip():
+                    result[key] = m.group(1).strip()
+            break
+        except OSError:
+            continue
+    return result
 
 
 def _dir_has_kontakt_content(p: Path) -> bool:
@@ -29,148 +71,103 @@ def _dir_has_kontakt_content(p: Path) -> bool:
     return False
 
 
-def _scan_root_folder(root_path: str, root_type: str) -> list[LibraryEntry]:
+def _get_registered_map() -> tuple[dict, dict, dict, dict, dict, dict]:
+    """Collect all registered libraries from registry, XML, JSON.
+
+    Returns: (registry_map, reg_sources, xml_data, xml_sources, json_data, json_sources)
+    - registry_map: {name: content_dir}
+    - reg_sources: {name: [registry_paths...]}
+    - xml_data: {name: {content_dir, snpid, ...}}
+    - xml_sources: {name: xml_file_path}
+    - json_data: {name: {content_dir, snpid, ...}}
+    - json_sources: {name: json_file_path}
+    """
+    registry_map, reg_sources = list_registry_libraries()
+    xml_data, xml_sources = list_from_xml()
+    json_data, json_sources = list_from_json()
+    return registry_map, reg_sources, xml_data, xml_sources, json_data, json_sources
+
+
+def _build_registered_entry(
+    name: str,
+    registry_map: dict,
+    reg_sources: dict,
+    xml_data: dict,
+    xml_sources: dict,
+    json_data: dict,
+    json_sources: dict,
+) -> LibraryEntry | None:
+    """Build a LibraryEntry from registration data."""
+    content_dir = ""
+    snpid = ""
+    found_reg = name in registry_map
+    found_xml = name in xml_data
+    found_json = name in json_data
+
+    if found_xml:
+        content_dir = xml_data[name].get("content_dir", "")
+        snpid = xml_data[name].get("snpid", "")
+    if not content_dir and found_json:
+        content_dir = json_data[name].get("content_dir", "")
+        if not snpid:
+            snpid = json_data[name].get("snpid", "")
+    if not content_dir and found_reg:
+        content_dir = registry_map[name]
+
+    if not content_dir:
+        return None
+
+    exists = Path(content_dir).is_dir() if content_dir else False
+    has_content = _dir_has_kontakt_content(Path(content_dir)) if exists else True
+
+    return LibraryEntry(
+        name=name,
+        content_dir=content_dir,
+        snpid=snpid,
+        found_in_registry=found_reg,
+        found_in_xml=found_xml,
+        found_in_json=found_json,
+        exists_on_disk=exists,
+        is_kontakt_library=has_content,
+        categories=get_library_categories(name),
+        notes=get_library_notes(name),
+        registry_paths=reg_sources.get(name, []),
+        xml_path=xml_sources.get(name, ""),
+        json_path=json_sources.get(name, ""),
+    )
+
+
+def scan_all() -> list[LibraryEntry]:
+    """Scan all registered libraries.
+
+    Returns only libraries that have registration info (registry/XML/JSON).
+    Libraries in library_folders without registration are not shown.
+    """
     results: list[LibraryEntry] = []
-    root = Path(root_path)
-    if not root.is_dir():
-        return results
-    for subfolder in sorted(root.iterdir()):
-        if not subfolder.is_dir():
-            continue
-        name = subfolder.name
-        content_dir = str(subfolder)
-        has_content = _dir_has_kontakt_content(subfolder)
-        if root_type == "standard" and not has_content:
-            continue
-        entry = LibraryEntry(
-            name=name, content_dir=content_dir,
-            exists_on_disk=True, is_kontakt_library=has_content,
-            library_type=root_type,
-            categories=get_library_categories(name),
-            notes=get_library_notes(name), hidden=is_hidden(name),
-        )
-        results.append(entry)
-    return results
+    seen_dirs: set[str] = set()
 
+    # Get all registration data
+    registry_map, reg_sources, xml_data, xml_sources, json_data, json_sources = _get_registered_map()
 
-def _scan_custom_libraries() -> list[LibraryEntry]:
-    results: list[LibraryEntry] = []
-    for custom in get_custom_libraries():
-        name = custom.get("name", "")
-        path_str = custom.get("path", "")
-        if not name or not path_str:
-            continue
-        p = Path(path_str)
-        exists = p.is_dir()
-        has_content = _dir_has_kontakt_content(p) if exists else False
-        entry = LibraryEntry(
-            name=name, content_dir=path_str,
-            exists_on_disk=exists, is_kontakt_library=has_content,
-            library_type="nonstandard",
-            categories=get_library_categories(name),
-            notes=get_library_notes(name), hidden=is_hidden(name),
-        )
-        results.append(entry)
-    return results
-
-
-def _scan_registry_libraries(
-    existing_paths, reg_sources, xml_sources, json_sources,
-    registry_map, xml_data, json_data,
-) -> list[LibraryEntry]:
-    results: list[LibraryEntry] = []
+    # Collect all unique names from registration sources
     all_names = set()
     all_names.update(registry_map.keys())
     all_names.update(xml_data.keys())
     all_names.update(json_data.keys())
 
+    # Build entries for all registered libraries
     for name in all_names:
-        content_dir = ""
-        snpid = ""
-        found_reg = name in registry_map
-        found_xml = name in xml_data
-        found_json = name in json_data
-
-        if found_xml:
-            content_dir = xml_data[name].get("content_dir", "")
-            snpid = xml_data[name].get("snpid", "")
-        if not content_dir and found_json:
-            content_dir = json_data[name].get("content_dir", "")
-            if not snpid:
-                snpid = json_data[name].get("snpid", "")
-        if not content_dir and found_reg:
-            content_dir = registry_map[name]
-
-        if not (found_xml or found_json):
-            continue
-        if not content_dir:
-            continue
-
-        normalized = str(Path(content_dir).resolve()) if content_dir else ""
-
-        exists = Path(content_dir).is_dir() if content_dir else False
-        has_content = _dir_has_kontakt_content(Path(content_dir)) if exists else True
-
-        entry = LibraryEntry(
-            name=name, content_dir=content_dir, snpid=snpid,
-            found_in_registry=found_reg, found_in_xml=found_xml,
-            found_in_json=found_json, exists_on_disk=exists,
-            is_kontakt_library=has_content, library_type="registry",
-            categories=get_library_categories(name),
-            notes=get_library_notes(name), hidden=is_hidden(name),
-            registry_paths=reg_sources.get(name, []),
-            xml_path=xml_sources.get(name, ""),
-            json_path=json_sources.get(name, ""),
+        entry = _build_registered_entry(
+            name, registry_map, reg_sources, xml_data, xml_sources, json_data, json_sources
         )
+        if entry is None:
+            continue
+        normalized = str(Path(entry.content_dir).resolve()) if entry.content_dir else ""
+        if normalized and normalized in seen_dirs:
+            continue
+        if normalized:
+            seen_dirs.add(normalized)
         results.append(entry)
-    return results
-
-
-def scan_all() -> list[LibraryEntry]:
-    results: list[LibraryEntry] = []
-    existing_paths = set()
-
-    for root in get_library_roots():
-        root_path = root.get("path", "")
-        root_type = root.get("type", "standard")
-        if root_path:
-            for lib in _scan_root_folder(root_path, root_type):
-                normalized = str(Path(lib.content_dir).resolve())
-                if normalized not in existing_paths:
-                    results.append(lib)
-                    existing_paths.add(normalized)
-
-    for lib in _scan_custom_libraries():
-        normalized = str(Path(lib.content_dir).resolve())
-        if normalized not in existing_paths:
-            results.append(lib)
-            existing_paths.add(normalized)
-
-    registry_map, reg_sources = list_registry_libraries()
-    xml_data, xml_sources = list_from_xml()
-    json_data, json_sources = list_from_json()
-    reg_libs = _scan_registry_libraries(
-        existing_paths, reg_sources, xml_sources, json_sources,
-        registry_map, xml_data, json_data,
-    )
-    for lib in reg_libs:
-        normalized = str(Path(lib.content_dir).resolve()) if lib.content_dir else ""
-        if normalized not in existing_paths:
-            results.append(lib)
-            existing_paths.add(normalized)
-        else:
-            # Merge registry/XML/JSON info into existing folder entry
-            for existing in results:
-                existing_norm = str(Path(existing.content_dir).resolve()) if existing.content_dir else ""
-                if existing_norm == normalized:
-                    existing.found_in_registry = lib.found_in_registry
-                    existing.found_in_xml = lib.found_in_xml
-                    existing.found_in_json = lib.found_in_json
-                    existing.registry_paths = lib.registry_paths
-                    existing.xml_path = lib.xml_path
-                    existing.json_path = lib.json_path
-                    existing.snpid = lib.snpid
-                    break
 
     results.sort(key=lambda e: e.name.lower())
     return results
