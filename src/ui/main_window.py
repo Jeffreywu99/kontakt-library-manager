@@ -93,11 +93,6 @@ class MainWindow(QMainWindow):
 
         toolbar.addStretch()
 
-        self._show_reg_cb = QCheckBox("显示注册库")
-        self._show_reg_cb.setToolTip("同时显示注册表/XML/JSON 中找到的音色库")
-        self._show_reg_cb.stateChanged.connect(self._on_show_registry_toggled)
-        toolbar.addWidget(self._show_reg_cb)
-
         self._show_hidden_cb = QCheckBox("显示已隐藏")
         self._show_hidden_cb.stateChanged.connect(self._refresh_table)
         toolbar.addWidget(self._show_hidden_cb)
@@ -226,9 +221,6 @@ class MainWindow(QMainWindow):
             self._manager.refresh()
         except Exception:
             pass
-        self._show_reg_cb.blockSignals(True)
-        self._show_reg_cb.setChecked(self._manager.show_registry)
-        self._show_reg_cb.blockSignals(False)
         self._refresh_category_list()
         self._refresh_table()
         self._admin_label.setText("管理员模式")
@@ -256,7 +248,7 @@ class MainWindow(QMainWindow):
         ns_item.setData(Qt.UserRole, "[[nonstandard]]")
         self._category_list.addItem(ns_item)
 
-        if reg_count > 0 or self._show_reg_cb.isChecked():
+        if reg_count > 0:
             reg_item = QListWidgetItem(f"注册库 ({reg_count})")
             reg_item.setData(Qt.UserRole, "[[registry]]")
             self._category_list.addItem(reg_item)
@@ -317,11 +309,6 @@ class MainWindow(QMainWindow):
         self._status_label.setText(f"显示 {shown} 个库（共 {total} 个）")
 
     def _on_category_changed(self):
-        self._refresh_table()
-
-    def _on_show_registry_toggled(self):
-        self._manager.show_registry = self._show_reg_cb.isChecked()
-        self._refresh_category_list()
         self._refresh_table()
 
     def _on_library_selected(self):
