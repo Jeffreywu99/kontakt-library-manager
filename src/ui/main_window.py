@@ -21,6 +21,7 @@ from src.ui.add_dialog import AddLibraryDialog
 from src.ui.category_dialog import CategoryDialog
 from src.ui.folder_dialog import FolderDialog
 from src.ui.batch_add_dialog import BatchAddDialog
+from src.ui.cleanup_dialog import CleanupDialog
 
 TYPE_LABELS = {"standard": "标准", "nonstandard": "非标准", "registry": "注册"}
 TYPE_LABELS_FULL = {"standard": "标准库", "nonstandard": "非标准库", "registry": "注册库"}
@@ -598,53 +599,12 @@ class MainWindow(QMainWindow):
         self._status_label.setText(msg)
 
     def _on_cleanup_stale(self):
-        from src.registry import list_hkcu_display_entries
-
-        # Phase 1: stale registry (ContentDir exists in reg but files gone)
-        stale_reg = self._manager.find_stale_registry_entries()
-
-        # Phase 2: orphaned HKCU display entries
-        known = set(lib.name for lib in self._manager.libraries if lib.found_in_registry)
-        hkcu_all = list_hkcu_display_entries()
-        stale_hkcu = [e for e in hkcu_all if e not in known]
-
-        total = len(stale_reg) + len(stale_hkcu)
-        if total == 0:
-            QMessageBox.information(self, "清理残留", "未发现残留。所有注册项均干净。")
-            return
-
-        lines = []
-        if stale_reg:
-            lines.append(f"注册表残留（硬盘文件已删除）: {len(stale_reg)} 个")
-            for lib in stale_reg[:10]:
-                lines.append(f"  - {lib.name}")
-            if len(stale_reg) > 10:
-                lines.append(f"  ... 还有 {len(stale_reg) - 10} 个")
-        if stale_hkcu:
-            if lines:
-                lines.append("")
-            lines.append(f"HKCU 残留（显示偏好，库已不存在）: {len(stale_hkcu)} 个")
-            for name in stale_hkcu[:10]:
-                lines.append(f"  - {name}")
-            if len(stale_hkcu) > 10:
-                lines.append(f"  ... 还有 {len(stale_hkcu) - 10} 个")
-
-        reply = QMessageBox.question(
-            self, "确认清理",
-            f"发现 {total} 个残留项：\n\n" + "\n".join(lines) + "\n\n确定清理？",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
-        )
-        if reply != QMessageBox.Yes:
-            return
-
-        success, fail = self._manager.cleanup_stale_entries()
-        self._refresh_category_list()
-        self._refresh_table()
-        msg = f"清理完成：成功 {success} 个"
-        if fail:
-            msg += f"，失败 {fail} 个"
-        self._status_label.setText(msg)
-        QMessageBox.information(self, "清理完成", msg)
+        dlg = CleanupDialog(self._manager, self)
+        if dlg.exec() == CleanupDialog.Accepted:
+            self._manager.refresh()
+            self._refresh_category_list()
+            self._refresh_table()
+            self._status_label.setText("残留清理完成")
 
     def _on_open_regedit(self):
         reg_paths_display = (
