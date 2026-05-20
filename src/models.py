@@ -11,6 +11,7 @@ class LibraryEntry:
     found_in_json: bool = False
     exists_on_disk: bool = True
     is_kontakt_library: bool = True
+    is_nonstandard: bool = False
     categories: list = field(default_factory=list)
     notes: str = ""
     registry_paths: list[str] = field(default_factory=list)

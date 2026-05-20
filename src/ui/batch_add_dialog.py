@@ -39,7 +39,8 @@ class BatchAddDialog(QDialog):
         self._manager = manager
         self._entries: list[tuple[str, str, bool]] = []
         self.setWindowTitle("批量入库")
-        self.setMinimumSize(560, 420)
+        self.setMinimumSize(640, 480)
+        self.resize(720, 540)
         self.setModal(True)
         self._setup_ui()
 
@@ -71,8 +72,9 @@ class BatchAddDialog(QDialog):
         # Tree: checkable library list
         self._tree = QTreeWidget()
         self._tree.setHeaderLabels(["", "库名称", "路径"])
-        self._tree.setColumnWidth(0, 30)
-        self._tree.setColumnWidth(1, 200)
+        self._tree.setColumnWidth(0, 40)
+        self._tree.setColumnWidth(1, 220)
+        self._tree.header().setStretchLastSection(True)
         self._tree.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self._tree, 1)
 

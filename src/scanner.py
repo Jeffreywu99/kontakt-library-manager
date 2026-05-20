@@ -1,7 +1,8 @@
-"""扫描所有数据源，只返回已注册的库。
+"""扫描用户目录中的音色库。
 
-核心理念：入库即显示，删除即消失。
-只显示在注册表/XML/JSON 中有记录的库。
+核心理念：只显示用户添加的目录中的库。
+- 标准库目录：有 .nicnt 且有注册信息的子文件夹
+- 非标准库目录：所有子文件夹（无 .nicnt）
 """
 
 import re
@@ -11,20 +12,18 @@ from src.registry import list_libraries as list_registry_libraries
 from src.files import list_from_xml, list_from_json
 from src.storage import (
     get_library_folders,
+    get_nonstandard_folders,
     get_library_categories,
     get_library_notes,
     get_patch_notes,
     get_patch_cache,
     set_patch_cache,
+    get_nonstandard_libraries,
 )
 
 
 def _extract_nicnt_info(folder: Path) -> dict:
-    """Extract metadata from .nicnt file in the library folder.
-
-    Returns dict with keys: snpid, upid, hu, jdx, company, auth_system, powered_by, regkey, name.
-    Missing fields are empty strings.
-    """
+    """Extract metadata from .nicnt file in the library folder."""
     result = {
         "snpid": "", "upid": "", "hu": "", "jdx": "",
         "company": "", "auth_system": "", "powered_by": "",
@@ -59,121 +58,178 @@ def _extract_nicnt_info(folder: Path) -> dict:
 
 
 def _dir_has_kontakt_content(p: Path) -> bool:
-    dirs_to_check = [p]
-    parent = p.parent
-    if parent != p:
-        dirs_to_check.append(parent)
-    for d in dirs_to_check:
-        if (bool(list(d.glob("*.nicnt"))) or
-            bool(list(d.glob("*.nki"))) or
-            bool(list(d.glob("*.nkx")))):
-            return True
-    return False
+    """Check if folder has Kontakt content (.nicnt, .nki, or .nkx)."""
+    try:
+        return bool(list(p.glob("*.nicnt"))) or bool(list(p.glob("*.nki"))) or bool(list(p.glob("*.nkx")))
+    except OSError:
+        return False
 
 
-def _get_registered_map() -> tuple[dict, dict, dict, dict, dict, dict]:
-    """Collect all registered libraries from registry, XML, JSON.
-
-    Returns: (registry_map, reg_sources, xml_data, xml_sources, json_data, json_sources)
-    - registry_map: {name: content_dir}
-    - reg_sources: {name: [registry_paths...]}
-    - xml_data: {name: {content_dir, snpid, ...}}
-    - xml_sources: {name: xml_file_path}
-    - json_data: {name: {content_dir, snpid, ...}}
-    - json_sources: {name: json_file_path}
-    """
+def _get_registration_info() -> tuple[dict, dict, dict, dict, dict, dict]:
+    """Get all registration data from registry, XML, JSON."""
     registry_map, reg_sources = list_registry_libraries()
     xml_data, xml_sources = list_from_xml()
     json_data, json_sources = list_from_json()
     return registry_map, reg_sources, xml_data, xml_sources, json_data, json_sources
 
 
-def _build_registered_entry(
-    name: str,
-    registry_map: dict,
-    reg_sources: dict,
-    xml_data: dict,
-    xml_sources: dict,
-    json_data: dict,
-    json_sources: dict,
-) -> LibraryEntry | None:
-    """Build a LibraryEntry from registration data."""
-    content_dir = ""
-    snpid = ""
-    found_reg = name in registry_map
-    found_xml = name in xml_data
-    found_json = name in json_data
-
-    if found_xml:
-        content_dir = xml_data[name].get("content_dir", "")
-        snpid = xml_data[name].get("snpid", "")
-    if not content_dir and found_json:
-        content_dir = json_data[name].get("content_dir", "")
-        if not snpid:
-            snpid = json_data[name].get("snpid", "")
-    if not content_dir and found_reg:
-        content_dir = registry_map[name]
-
-    if not content_dir:
+def _find_registered_library_by_dir(content_dir: str, registry_map: dict, reg_sources: dict,
+                                     xml_data: dict, xml_sources: dict, json_data: dict, json_sources: dict) -> LibraryEntry | None:
+    """Find registration info for a library by its content directory."""
+    target = str(Path(content_dir).resolve()).lower() if content_dir else ""
+    if not target:
         return None
 
-    exists = Path(content_dir).is_dir() if content_dir else False
-    has_content = _dir_has_kontakt_content(Path(content_dir)) if exists else True
+    # Find by content_dir in registration data
+    found_name = None
+    for name, cd in registry_map.items():
+        if cd and str(Path(cd).resolve()).lower() == target:
+            found_name = name
+            break
+    if not found_name:
+        for name, info in xml_data.items():
+            cd = info.get("content_dir", "")
+            if cd and str(Path(cd).resolve()).lower() == target:
+                found_name = name
+                break
+    if not found_name:
+        for name, info in json_data.items():
+            cd = info.get("content_dir", "")
+            if cd and str(Path(cd).resolve()).lower() == target:
+                found_name = name
+                break
+
+    if not found_name:
+        return None
+
+    # Build entry with registration info
+    snpid = ""
+    if found_name in xml_data:
+        snpid = xml_data[found_name].get("snpid", "")
+    if not snpid and found_name in json_data:
+        snpid = json_data[found_name].get("snpid", "")
 
     return LibraryEntry(
-        name=name,
+        name=found_name,
         content_dir=content_dir,
         snpid=snpid,
-        found_in_registry=found_reg,
-        found_in_xml=found_xml,
-        found_in_json=found_json,
-        exists_on_disk=exists,
-        is_kontakt_library=has_content,
-        categories=get_library_categories(name),
-        notes=get_library_notes(name),
-        registry_paths=reg_sources.get(name, []),
-        xml_path=xml_sources.get(name, ""),
-        json_path=json_sources.get(name, ""),
+        found_in_registry=found_name in registry_map,
+        found_in_xml=found_name in xml_data,
+        found_in_json=found_name in json_data,
+        exists_on_disk=True,
+        is_kontakt_library=True,
+        is_nonstandard=False,
+        categories=get_library_categories(found_name),
+        notes=get_library_notes(found_name),
+        registry_paths=reg_sources.get(found_name, []),
+        xml_path=xml_sources.get(found_name, ""),
+        json_path=json_sources.get(found_name, ""),
     )
 
 
-def scan_all() -> list[LibraryEntry]:
-    """Scan all registered libraries.
+def _scan_standard_folders(registry_map: dict, reg_sources: dict,
+                           xml_data: dict, xml_sources: dict, json_data: dict, json_sources: dict) -> list[LibraryEntry]:
+    """Scan standard library folders for registered Kontakt libraries."""
+    results = []
+    seen_dirs = set()
 
-    Returns only libraries that have registration info (registry/XML/JSON).
-    Libraries in library_folders without registration are not shown.
-    """
-    results: list[LibraryEntry] = []
-    seen_dirs: set[str] = set()
-
-    # Get all registration data
-    registry_map, reg_sources, xml_data, xml_sources, json_data, json_sources = _get_registered_map()
-
-    # Collect all unique names from registration sources
-    all_names = set()
-    all_names.update(registry_map.keys())
-    all_names.update(xml_data.keys())
-    all_names.update(json_data.keys())
-
-    # Build entries for all registered libraries
-    for name in all_names:
-        entry = _build_registered_entry(
-            name, registry_map, reg_sources, xml_data, xml_sources, json_data, json_sources
-        )
-        if entry is None:
+    for folder_path in get_library_folders():
+        folder = Path(folder_path)
+        if not folder.is_dir():
             continue
-        normalized = str(Path(entry.content_dir).resolve()) if entry.content_dir else ""
-        if normalized and normalized in seen_dirs:
-            continue
-        if normalized:
+
+        for subfolder in folder.iterdir():
+            if not subfolder.is_dir():
+                continue
+
+            normalized = str(subfolder.resolve())
+            if normalized in seen_dirs:
+                continue
             seen_dirs.add(normalized)
-        results.append(entry)
 
+            # Check if has Kontakt content
+            if not _dir_has_kontakt_content(subfolder):
+                continue
+
+            # Find registration info
+            entry = _find_registered_library_by_dir(
+                str(subfolder), registry_map, reg_sources, xml_data, xml_sources, json_data, json_sources
+            )
+            if entry:
+                results.append(entry)
+
+    return results
+
+
+def _scan_nonstandard_folders() -> list[LibraryEntry]:
+    """Scan non-standard library folders for third-party sample libraries."""
+    results = []
+    seen_dirs = set()
+    saved_libs = {lib.get("path"): lib for lib in get_nonstandard_libraries()}
+
+    for folder_path in get_nonstandard_folders():
+        folder = Path(folder_path)
+        if not folder.is_dir():
+            continue
+
+        for subfolder in folder.iterdir():
+            if not subfolder.is_dir():
+                continue
+
+            normalized = str(subfolder.resolve())
+            if normalized in seen_dirs:
+                continue
+            seen_dirs.add(normalized)
+
+            # Skip if has Kontakt content (should be in standard folder)
+            if _dir_has_kontakt_content(subfolder):
+                continue
+
+            # Get saved info or use defaults
+            saved = saved_libs.get(normalized, {})
+            name = saved.get("name", subfolder.name)
+            categories = saved.get("categories", [])
+            notes = saved.get("notes", "")
+
+            entry = LibraryEntry(
+                name=name,
+                content_dir=normalized,
+                snpid="",
+                found_in_registry=False,
+                found_in_xml=False,
+                found_in_json=False,
+                exists_on_disk=True,
+                is_kontakt_library=False,
+                is_nonstandard=True,
+                categories=categories,
+                notes=notes,
+                registry_paths=[],
+                xml_path="",
+                json_path="",
+            )
+            results.append(entry)
+
+    return results
+
+
+def scan_all() -> list[LibraryEntry]:
+    """Scan all libraries from user-configured folders.
+
+    Standard folders: registered Kontakt libraries with .nicnt
+    Non-standard folders: third-party sample libraries without .nicnt
+    """
+    registry_map, reg_sources, xml_data, xml_sources, json_data, json_sources = _get_registration_info()
+
+    standard = _scan_standard_folders(registry_map, reg_sources, xml_data, xml_sources, json_data, json_sources)
+    nonstandard = _scan_nonstandard_folders()
+
+    results = standard + nonstandard
     results.sort(key=lambda e: e.name.lower())
     return results
 
 
 def scan_patches(library_name: str, content_dir: str) -> list[PatchEntry]:
+    """Scan .nki files in a library folder."""
     cached = get_patch_cache(library_name)
     if cached is not None:
         patches = []

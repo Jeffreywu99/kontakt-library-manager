@@ -22,11 +22,13 @@ def _data_file() -> Path:
 def _default_data() -> dict:
     return {
         "library_folders": [],
+        "nonstandard_folders": [],
         "categories": [],
         "library_categories": {},
         "library_notes": {},
         "patch_notes": {},
         "patch_scan_cache": {},
+        "nonstandard_libraries": [],
     }
 
 
@@ -77,17 +79,27 @@ def remove_library_folder(path: str) -> None:
     _save(data)
 
 
-# Legacy aliases for backward compatibility
-def get_library_roots() -> list[dict]:
-    return [{"path": p, "type": "standard"} for p in get_library_folders()]
+# ---- Non-standard Folders ----
+
+def get_nonstandard_folders() -> list[str]:
+    data = _load()
+    return data.get("nonstandard_folders", [])
 
 
-def add_library_root(path: str, root_type: str = "standard") -> None:
-    add_library_folder(path)
+def add_nonstandard_folder(path: str) -> None:
+    data = _load()
+    normalized = str(Path(path).resolve())
+    if normalized not in data.get("nonstandard_folders", []):
+        data.setdefault("nonstandard_folders", []).append(normalized)
+    _save(data)
 
 
-def remove_library_root(path: str) -> None:
-    remove_library_folder(path)
+def remove_nonstandard_folder(path: str) -> None:
+    data = _load()
+    normalized = str(Path(path).resolve())
+    if normalized in data.get("nonstandard_folders", []):
+        data["nonstandard_folders"].remove(normalized)
+    _save(data)
 
 
 # ---- Categories ----
@@ -243,4 +255,49 @@ def clear_patch_cache(library_name: str | None = None) -> None:
         data["patch_scan_cache"].pop(library_name, None)
     else:
         data["patch_scan_cache"] = {}
+    _save(data)
+
+
+# ---- Non-standard Libraries ----
+
+def get_nonstandard_libraries() -> list[dict]:
+    data = _load()
+    return data.get("nonstandard_libraries", [])
+
+
+def add_nonstandard_library(name: str, path: str, categories: list[str] | None = None, notes: str = "") -> None:
+    data = _load()
+    lib = {
+        "name": name,
+        "path": path,
+        "categories": categories or [],
+        "notes": notes,
+    }
+    # Check if already exists by path
+    existing = [l for l in data["nonstandard_libraries"] if l.get("path") == path]
+    if existing:
+        # Update existing
+        existing[0].update(lib)
+    else:
+        data["nonstandard_libraries"].append(lib)
+    _save(data)
+
+
+def update_nonstandard_library(path: str, name: str | None = None, categories: list[str] | None = None, notes: str | None = None) -> None:
+    data = _load()
+    for lib in data["nonstandard_libraries"]:
+        if lib.get("path") == path:
+            if name is not None:
+                lib["name"] = name
+            if categories is not None:
+                lib["categories"] = categories
+            if notes is not None:
+                lib["notes"] = notes
+            break
+    _save(data)
+
+
+def remove_nonstandard_library(path: str) -> None:
+    data = _load()
+    data["nonstandard_libraries"] = [l for l in data["nonstandard_libraries"] if l.get("path") != path]
     _save(data)

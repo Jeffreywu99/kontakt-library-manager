@@ -27,6 +27,9 @@ from src.storage import (
     get_library_folders,
     add_library_folder,
     remove_library_folder,
+    get_nonstandard_folders,
+    add_nonstandard_folder,
+    remove_nonstandard_folder,
     get_categories,
     add_category,
     remove_category,
@@ -40,6 +43,8 @@ from src.storage import (
     get_patch_notes,
     set_patch_notes,
     clear_patch_cache,
+    get_nonstandard_libraries,
+    update_nonstandard_library,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,15 +92,21 @@ class LibraryManager:
         remove_library_folder(path_str)
         self.refresh()
 
-    # Legacy aliases
-    def list_roots(self) -> list[dict]:
-        return [{"path": p, "type": "standard"} for p in get_library_folders()]
+    # ---- Non-standard Library Folders ----
 
-    def add_root(self, path_str: str, root_type: str = "standard") -> None:
-        self.add_folder(path_str)
+    def list_nonstandard_folders(self) -> list[str]:
+        return get_nonstandard_folders()
 
-    def remove_root(self, path_str: str) -> None:
-        self.remove_folder(path_str)
+    def add_nonstandard_folder(self, path_str: str) -> None:
+        p = Path(path_str)
+        if not p.is_dir():
+            raise LibraryManagerError(f"文件夹不存在: {path_str}")
+        add_nonstandard_folder(path_str)
+        self.refresh()
+
+    def remove_nonstandard_folder(self, path_str: str) -> None:
+        remove_nonstandard_folder(path_str)
+        self.refresh()
 
     # ---- Add / Remove (Kontakt registration) ----
 
@@ -417,3 +428,20 @@ class LibraryManager:
                 lib._cached_size_mb = size_mb
                 break
         return size_mb
+
+    # ---- Non-standard Library Operations ----
+
+    def list_nonstandard_libraries(self) -> list[dict]:
+        return get_nonstandard_libraries()
+
+    def update_nonstandard_library(self, path: str, name: str | None = None, categories: list[str] | None = None, notes: str | None = None) -> None:
+        update_nonstandard_library(path, name, categories, notes)
+        for lib in self._libraries:
+            if lib.content_dir == path:
+                if name is not None:
+                    lib.name = name
+                if categories is not None:
+                    lib.categories = categories
+                if notes is not None:
+                    lib.notes = notes
+                break

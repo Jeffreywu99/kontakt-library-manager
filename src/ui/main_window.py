@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QTableWidget, QTableWidgetItem, QPushButton, QListWidget, QListWidgetItem,
     QStatusBar, QLabel, QMessageBox, QHeaderView, QTreeWidget, QTreeWidgetItem,
-    QTextEdit, QMenu, QAbstractItemView, QScrollArea, QFrame,
+    QTextEdit, QMenu, QAbstractItemView, QScrollArea, QFrame, QLineEdit,
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction
@@ -37,6 +37,7 @@ class MainWindow(QMainWindow):
         self._manager = LibraryManager()
         self._current_patches: list[PatchEntry] = []
         self._current_patch_path: str = ""
+        self._search_text: str = ""
         self._selection_timer = QTimer()
         self._selection_timer.setSingleShot(True)
         self._selection_timer.setInterval(50)
@@ -93,6 +94,14 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self._refresh_btn)
 
         toolbar.addStretch()
+
+        # Search box
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("搜索音色库...")
+        self._search_input.setMaximumWidth(200)
+        self._search_input.textChanged.connect(self._on_search_changed)
+        toolbar.addWidget(self._search_input)
+
         main_layout.addLayout(toolbar)
 
         splitter = QSplitter(Qt.Horizontal)
@@ -203,10 +212,8 @@ class MainWindow(QMainWindow):
     def _setup_status(self):
         self._status = QStatusBar()
         self.setStatusBar(self._status)
-        self._status_label = QLabel()
+        self._status_label = QLabel("就绪")
         self._status.addWidget(self._status_label)
-        self._admin_label = QLabel()
-        self._status.addPermanentWidget(self._admin_label)
 
     # ====== Event Handlers ======
 
@@ -219,42 +226,62 @@ class MainWindow(QMainWindow):
             _ui_trace(f"_on_initial_load refresh ERROR: {e}")
         self._refresh_category_list()
         self._refresh_table()
-        self._admin_label.setText("管理员模式")
-        self._admin_label.setStyleSheet("color: #4caf50; padding-right: 8px;")
 
     def _refresh_category_list(self):
         self._category_list.blockSignals(True)
         self._category_list.clear()
         libs = self._manager.libraries
 
+        # Default categories
         total_count = len(libs)
+        standard_count = sum(1 for l in libs if not l.is_nonstandard)
+        nonstandard_count = sum(1 for l in libs if l.is_nonstandard)
+
         self._all_item = QListWidgetItem(f"全部 ({total_count})")
         self._all_item.setData(Qt.UserRole, "")
         self._category_list.addItem(self._all_item)
 
-        cats = self._manager.list_categories()
-        for cat in cats:
-            count = cat.get("count", 0)
-            item = QListWidgetItem(f"  {cat['name']} ({count})")
-            item.setData(Qt.UserRole, cat["name"])
-            self._category_list.addItem(item)
+        std_item = QListWidgetItem(f"标准库 ({standard_count})")
+        std_item.setData(Qt.UserRole, "__standard__")
+        self._category_list.addItem(std_item)
 
-        uncategorized = sum(1 for l in libs if not l.categories)
-        uncat_item = QListWidgetItem(f"  未分类 ({uncategorized})")
-        uncat_item.setData(Qt.UserRole, "__uncategorized__")
-        self._category_list.addItem(uncat_item)
+        nonstd_item = QListWidgetItem(f"非标准库 ({nonstandard_count})")
+        nonstd_item.setData(Qt.UserRole, "__nonstandard__")
+        self._category_list.addItem(nonstd_item)
+
+        # User categories
+        cats = self._manager.list_categories()
+        if cats:
+            sep_item = QListWidgetItem("── 用户分类 ──")
+            sep_item.setFlags(Qt.NoItemFlags)
+            sep_item.setForeground(Qt.darkGray)
+            self._category_list.addItem(sep_item)
+            for cat in cats:
+                count = cat.get("count", 0)
+                item = QListWidgetItem(f"  {cat['name']} ({count})")
+                item.setData(Qt.UserRole, cat["name"])
+                self._category_list.addItem(item)
 
         self._category_list.setCurrentRow(0)
         self._category_list.blockSignals(False)
 
     def _filtered_libraries(self) -> list[LibraryEntry]:
         libs = self._manager.libraries
+
+        # Filter by category
         if self._category_list.currentItem():
             raw = self._category_list.currentItem().data(Qt.UserRole)
-            if raw == "__uncategorized__":
-                libs = [l for l in libs if not l.categories]
+            if raw == "__standard__":
+                libs = [l for l in libs if not l.is_nonstandard]
+            elif raw == "__nonstandard__":
+                libs = [l for l in libs if l.is_nonstandard]
             elif raw:
                 libs = [l for l in libs if raw in l.categories]
+
+        # Filter by search text
+        if self._search_text:
+            libs = [l for l in libs if self._search_text in l.name.lower() or self._search_text in l.content_dir.lower()]
+
         return libs
 
     def _refresh_table(self):
@@ -264,15 +291,26 @@ class MainWindow(QMainWindow):
             self._table.insertRow(row)
             self._table.setItem(row, 0, QTableWidgetItem(lib.name))
             self._table.setItem(row, 1, QTableWidgetItem(lib.content_dir))
-            exists_item = QTableWidgetItem("是" if lib.exists_on_disk else "否")
-            exists_item.setForeground(Qt.green if lib.exists_on_disk else Qt.red)
+            exists_text = "●" if lib.exists_on_disk else "○"
+            exists_item = QTableWidgetItem(exists_text)
+            exists_item.setForeground(Qt.gray)
+            exists_item.setTextAlignment(Qt.AlignCenter)
             self._table.setItem(row, 2, exists_item)
+
+            # Mark non-standard libraries
+            if lib.is_nonstandard:
+                name_item = self._table.item(row, 0)
+                name_item.setForeground(Qt.darkCyan)
             self._table.setItem(row, 3, QTableWidgetItem(", ".join(lib.categories)))
         total = len(self._manager.libraries)
         shown = len(libs)
-        self._status_label.setText(f"显示 {shown} 个库（共 {total} 个已注册）")
+        self._status_label.setText(f"显示 {shown} 个库（共 {total} 个）")
 
     def _on_category_changed(self):
+        self._refresh_table()
+
+    def _on_search_changed(self, text: str):
+        self._search_text = text.lower().strip()
         self._refresh_table()
 
     def _on_library_selected(self):
@@ -343,6 +381,12 @@ class MainWindow(QMainWindow):
         self._patch_notes_edit.blockSignals(False)
 
     def _build_source_info(self, lib: LibraryEntry):
+        # Non-standard libraries don't have registration info
+        if lib.is_nonstandard:
+            self._source_info.setText("非标准库（本地管理）")
+            self._view_source_btn.setEnabled(bool(lib.content_dir))
+            return
+
         lines = []
         if lib.found_in_registry:
             for rp in lib.registry_paths:
@@ -355,10 +399,6 @@ class MainWindow(QMainWindow):
             self._source_info.setText("来源: 未知")
         else:
             self._source_info.setText("\n".join(lines))
-        if not lib.is_kontakt_library:
-            self._source_info.setText(
-                self._source_info.text() + "\n\n⚠ 此条目不是 Kontakt 音色库（无 .nicnt/.nki/.nkx 文件）"
-            )
         self._view_source_btn.setEnabled(bool(lines) or bool(lib.content_dir))
 
     def _on_patch_selected(self):
