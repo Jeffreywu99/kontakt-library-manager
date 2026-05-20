@@ -1,5 +1,5 @@
 #define MyAppName "Kontakt Library Manager"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "0.2.0"
 #define MyAppPublisher "KontaktTools"
 #define MyAppExeName "KontaktLibraryManager.exe"
 
@@ -12,7 +12,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=dist
-OutputBaseFilename=KontaktLibraryManager-Setup-1.0.1
+OutputBaseFilename=KontaktLibraryManager-Setup-0.2.0
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
