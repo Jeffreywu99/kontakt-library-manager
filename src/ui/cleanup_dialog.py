@@ -8,10 +8,10 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal
 from src.manager import LibraryManager, LibraryManagerError
 from src.registry import list_libraries as list_registry_libraries
+from src.registry import list_hkcu_display_entries
 from src.files import list_from_xml, list_from_json
 from src.scanner import _dir_has_kontakt_content
 
-# Known non-Kontakt app names to exclude
 _NOT_KONTAKT = {
     "kontakt 5", "kontakt 6", "kontakt 7", "kontakt 8",
     "kontakt factory library", "kontakt factory library 2",
@@ -19,21 +19,16 @@ _NOT_KONTAKT = {
     "guitar rig 5", "guitar rig 6", "guitar rig 7",
     "super 8", "super 8 r2",
     "native access", "service center", "service center 2",
-    "shared", "alsupport", "reaktor", "reaktor 6",
-    "absynth", "absynth 5", "sample modeling",
+    "shared", "alsupport", "reaktor", "reaktor 6", "absynth", "absynth 5",
 }
 
 
 def _is_kontakt_library(name: str, content_dir: str) -> bool:
-    """Check if an entry is actually a Kontakt library (not a plugin/app)."""
     name_lower = name.lower()
-    # Filter out known non-Kontakt apps
     if name_lower in _NOT_KONTAKT:
         return False
-    # Filter NKS preset packs (Arturia, Waves, UAD, etc.)
-    arturia_kw = ["arturia", "waves", "uad", "izotope", "ozone", "insight",
-                  "pianoteq", "modartt", "vinyl", "ambient"]
-    for kw in arturia_kw:
+    for kw in ["arturia", "waves", "uadx", "uad ", "izotope", "ozone",
+               "pianoteq", "modartt", "vinyl", "ambient"]:
         if kw in name_lower:
             return False
     if not content_dir:
@@ -41,23 +36,21 @@ def _is_kontakt_library(name: str, content_dir: str) -> bool:
     p = Path(content_dir)
     if p.is_dir():
         return _dir_has_kontakt_content(p)
-    # If dir doesn't exist, trust the XML/JSON registration
     return True
 
 
 class ScanWorker(QThread):
-    """Scan all Kontakt registration sources in background."""
-    finished = Signal(list)  # list of {name, content_dir, source_type}
+    finished = Signal(list)
 
     def run(self):
         results = []
         seen = set()
 
-        # 1. Registry
+        # 1. Registry (entries WITH ContentDir)
         reg_libs, _ = list_registry_libraries()
         for name, content_dir in reg_libs.items():
             if name not in seen and _is_kontakt_library(name, content_dir):
-                results.append({"name": name, "content_dir": content_dir, "source": "注册表"})
+                results.append({"name": name, "content_dir": content_dir, "source": "注册表", "has_files": True})
                 seen.add(name)
 
         # 2. XML
@@ -66,7 +59,7 @@ class ScanWorker(QThread):
             if name not in seen:
                 cd = data.get("content_dir", "")
                 if _is_kontakt_library(name, cd):
-                    results.append({"name": name, "content_dir": cd, "source": "Service Center"})
+                    results.append({"name": name, "content_dir": cd, "source": "Service Center", "has_files": True})
                     seen.add(name)
 
         # 3. JSON
@@ -75,8 +68,27 @@ class ScanWorker(QThread):
             if name not in seen:
                 cd = data.get("content_dir", "")
                 if _is_kontakt_library(name, cd):
-                    results.append({"name": name, "content_dir": cd, "source": "installed_products"})
+                    results.append({"name": name, "content_dir": cd, "source": "installed_products", "has_files": True})
                     seen.add(name)
+
+        # 4. HKCU display entries (UserListIndex only, no ContentDir — these are UI prefs for deleted libs)
+        name_lower = {n.lower() for n in seen}
+        hkcu_entries = list_hkcu_display_entries()
+        for name in hkcu_entries:
+            nl = name.lower()
+            if nl in _NOT_KONTAKT:
+                continue
+            skip = False
+            for kw in ["arturia", "waves", "uadx", "uad ", "izotope", "ozone",
+                       "pianoteq", "modartt", "vinyl", "ambient"]:
+                if kw in nl:
+                    skip = True
+                    break
+            if skip:
+                continue
+            if nl not in name_lower:
+                results.append({"name": name, "content_dir": "", "source": "HKCU(显示偏好)", "has_files": False})
+                seen.add(name)
 
         self.finished.emit(results)
 
@@ -87,7 +99,7 @@ class CleanupDialog(QDialog):
         self._manager = manager
         self._scan_results: list[dict] = []
         self.setWindowTitle("扫描残留")
-        self.setMinimumSize(560, 420)
+        self.setMinimumSize(600, 440)
         self.setModal(True)
         self._setup_ui()
 
@@ -96,23 +108,23 @@ class CleanupDialog(QDialog):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
-        hint = QLabel("扫描所有注册位置（注册表 + Service Center + installed_products），\n"
-                      "找出不在当前管理列表中的 Kontakt 音色库残留。")
+        hint = QLabel("扫描所有注册位置，找出你已删除但注册信息还在的 Kontakt 音色库残留。\n"
+                      "（硬盘不存在的 + HKCU 残留的都会列出来）")
         hint.setStyleSheet("color: #999; font-size: 11px;")
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
-        btn_layout = QHBoxLayout()
+        top = QHBoxLayout()
         self._scan_btn = QPushButton("开始扫描")
         self._scan_btn.clicked.connect(self._on_scan)
-        btn_layout.addWidget(self._scan_btn)
-        btn_layout.addStretch()
-        layout.addLayout(btn_layout)
+        top.addWidget(self._scan_btn)
+        top.addStretch()
+        layout.addLayout(top)
 
         self._tree = QTreeWidget()
-        self._tree.setHeaderLabels(["", "库名称", "路径", "来源"])
-        self._tree.setColumnWidth(0, 30)
-        self._tree.setColumnWidth(1, 200)
+        self._tree.setHeaderLabels(["", "库名称", "路径 / 状态", "来源"])
+        self._tree.setColumnWidth(0, 36)
+        self._tree.setColumnWidth(1, 220)
         self._tree.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self._tree, 1)
 
@@ -126,25 +138,19 @@ class CleanupDialog(QDialog):
 
         bottom = QHBoxLayout()
         bottom.addStretch()
-
         select_all = QPushButton("全选")
         select_all.clicked.connect(lambda: self._set_all(Qt.Checked))
         bottom.addWidget(select_all)
-
         deselect_all = QPushButton("取消全选")
         deselect_all.clicked.connect(lambda: self._set_all(Qt.Unchecked))
         bottom.addWidget(deselect_all)
-
         cancel_btn = QPushButton("关闭")
         cancel_btn.clicked.connect(self.reject)
         bottom.addWidget(cancel_btn)
-
         self._delete_btn = QPushButton("删除选中")
-        self._delete_btn.setDefault(True)
         self._delete_btn.clicked.connect(self._on_delete)
         self._delete_btn.setEnabled(False)
         bottom.addWidget(self._delete_btn)
-
         layout.addLayout(bottom)
 
     def _on_item_clicked(self, item, col):
@@ -172,26 +178,38 @@ class CleanupDialog(QDialog):
         self._worker.finished.connect(self._on_scan_done)
         self._worker.start()
 
-    def _on_scan_done(self, results):
-        self._scan_results = results
+    def _on_scan_done(self, all_results):
         self._tree.clear()
-
-        # Which libraries are in the user's managed list?
         managed_names = set(lib.name.lower() for lib in self._manager.libraries)
 
-        orphan_count = 0
-        for r in results:
-            name = r["name"]
-            is_orphan = name.lower() not in managed_names
-            if is_orphan:
-                item = QTreeWidgetItem(["", name, r["content_dir"], r["source"]])
-                item.setCheckState(0, Qt.Checked)
-                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-                self._tree.addTopLevelItem(item)
-                orphan_count += 1
+        # Separate into two groups
+        orphans = []    # registered but not in managed list
+        stale_hkcu = [] # HKCU display prefs for deleted libs
 
-        total = len(results)
-        self._stats.setText(f"共找到 {total} 个 Kontakt 库，{orphan_count} 个不在管理列表中")
+        for r in all_results:
+            name = r["name"]
+            if name.lower() in managed_names:
+                continue  # skip - user already has this in their managed list
+            if not r["has_files"]:
+                stale_hkcu.append(r)
+            else:
+                orphans.append(r)
+
+        for r in orphans:
+            item = QTreeWidgetItem(["", r["name"], r["content_dir"], r["source"]])
+            item.setCheckState(0, Qt.Checked)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            self._tree.addTopLevelItem(item)
+
+        for r in stale_hkcu:
+            item = QTreeWidgetItem(["", r["name"], "(硬盘已删除)", r["source"]])
+            item.setCheckState(0, Qt.Checked)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            self._tree.addTopLevelItem(item)
+
+        total = len(orphans) + len(stale_hkcu)
+        self._stats.setText(
+            f"找到 {len(orphans)} 个未管理库 + {len(stale_hkcu)} 个 HKCU 残留，共 {total} 个")
         self._scan_btn.setEnabled(True)
         self._update_delete_btn()
 
