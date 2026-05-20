@@ -9,7 +9,6 @@ from src.models import LibraryEntry, PatchEntry
 from src.scanner import scan_all, scan_patches
 from src.registry import (
     add_library as reg_add, remove_library as reg_remove, is_admin,
-    cleanup_stale_hkcu as reg_cleanup_hkcu, list_hkcu_display_entries,
 )
 from src.files import create_xml, create_json, remove_xml, remove_json
 from src.storage import (
@@ -22,8 +21,6 @@ from src.storage import (
     hide_library,
     unhide_library,
     get_hidden_libraries,
-    get_show_registry,
-    set_show_registry,
     get_categories,
     add_category,
     remove_category,
@@ -119,17 +116,6 @@ class LibraryManager:
     def get_hidden_libraries(self) -> list[str]:
         return get_hidden_libraries()
 
-    # ---- Show Registry Toggle ----
-
-    @property
-    def show_registry(self) -> bool:
-        return get_show_registry()
-
-    @show_registry.setter
-    def show_registry(self, value: bool) -> None:
-        set_show_registry(value)
-        self.refresh()
-
     # ---- Add / Remove (Kontakt registration) ----
 
     def add_libraries_batch(self, entries: list[tuple[str, str]]) -> dict[str, str]:
@@ -193,39 +179,6 @@ class LibraryManager:
         if entry is None:
             raise LibraryManagerError(f"添加后未能找到库 '{name}'，请检查。")
         return entry
-
-    def find_stale_registry_entries(self) -> list[LibraryEntry]:
-        """Find registry libraries whose content_dir no longer exists on disk."""
-        stale = []
-        for lib in self._libraries:
-            if (lib.found_in_registry or lib.found_in_xml or lib.found_in_json):
-                if not lib.exists_on_disk and lib.content_dir:
-                    stale.append(lib)
-        return stale
-
-    def cleanup_stale_entries(self) -> tuple[int, int]:
-        """Remove all stale registry entries (HKLM+HKCU). Returns (success, fail)."""
-        stale = self.find_stale_registry_entries()
-        success = 0
-        fail = 0
-        for lib in stale:
-            try:
-                self.remove_library(lib.name)
-                success += 1
-            except LibraryManagerError:
-                fail += 1
-
-        # Also clean HKCU display entries for deleted libraries
-        try:
-            known = set(lib.name for lib in self._libraries)
-            hkcu_count = reg_cleanup_hkcu(known)
-            if hkcu_count:
-                success += hkcu_count
-        except Exception as e:
-            logger.warning(f"HKCU cleanup failed: {e}")
-
-        self.refresh()
-        return success, fail
 
     def remove_library(self, name: str) -> dict:
         if not name.strip():

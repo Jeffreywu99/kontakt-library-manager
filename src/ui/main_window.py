@@ -3,8 +3,6 @@
 Left: category/type panel | Center: library table | Right: patch details + notes + source info
 """
 
-import os
-import subprocess
 from pathlib import Path
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
@@ -21,7 +19,6 @@ from src.ui.add_dialog import AddLibraryDialog
 from src.ui.category_dialog import CategoryDialog
 from src.ui.folder_dialog import FolderDialog
 from src.ui.batch_add_dialog import BatchAddDialog
-from src.ui.cleanup_dialog import CleanupDialog
 
 TYPE_LABELS = {"standard": "标准", "nonstandard": "非标准", "registry": "注册"}
 TYPE_LABELS_FULL = {"standard": "标准库", "nonstandard": "非标准库", "registry": "注册库"}
@@ -76,16 +73,6 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self._folder_btn)
 
         toolbar.addSpacing(16)
-
-        self._regedit_btn = QPushButton("打开注册表")
-        self._regedit_btn.setToolTip("打开 regedit 查看/手动清理注册表")
-        self._regedit_btn.clicked.connect(self._on_open_regedit)
-        toolbar.addWidget(self._regedit_btn)
-
-        self._cleanup_stale_btn = QPushButton("清理残留")
-        self._cleanup_stale_btn.setToolTip("一键删除注册表中存在但硬盘上已被删除的库")
-        self._cleanup_stale_btn.clicked.connect(self._on_cleanup_stale)
-        toolbar.addWidget(self._cleanup_stale_btn)
 
         self._rescan_btn = QPushButton("刷新音色扫描")
         self._rescan_btn.clicked.connect(self._on_rescan_patches)
@@ -233,10 +220,9 @@ class MainWindow(QMainWindow):
 
         std_count = sum(1 for l in libs if l.library_type == "standard" and not l.hidden)
         ns_count = sum(1 for l in libs if l.library_type == "nonstandard" and not l.hidden)
-        reg_count = sum(1 for l in libs if l.library_type == "registry" and not l.hidden)
         hidden_count = sum(1 for l in libs if l.hidden)
 
-        self._all_item = QListWidgetItem(f"全部 ({std_count + ns_count + reg_count})")
+        self._all_item = QListWidgetItem(f"全部 ({std_count + ns_count})")
         self._all_item.setData(Qt.UserRole, "")
         self._category_list.addItem(self._all_item)
 
@@ -247,11 +233,6 @@ class MainWindow(QMainWindow):
         ns_item = QListWidgetItem(f"非标准库 ({ns_count})")
         ns_item.setData(Qt.UserRole, "[[nonstandard]]")
         self._category_list.addItem(ns_item)
-
-        if reg_count > 0:
-            reg_item = QListWidgetItem(f"注册库 ({reg_count})")
-            reg_item.setData(Qt.UserRole, "[[registry]]")
-            self._category_list.addItem(reg_item)
 
         cats = self._manager.list_categories()
         for cat in cats:
@@ -584,35 +565,6 @@ class MainWindow(QMainWindow):
         if errors:
             msg += f"\n{len(errors)} 个失败:\n" + "\n".join(errors)
         self._status_label.setText(msg)
-
-    def _on_cleanup_stale(self):
-        dlg = CleanupDialog(self._manager, self)
-        if dlg.exec() == CleanupDialog.Accepted:
-            self._manager.refresh()
-            self._refresh_category_list()
-            self._refresh_table()
-            self._status_label.setText("残留清理完成")
-
-    def _on_open_regedit(self):
-        reg_paths_display = (
-            "HKLM\\SOFTWARE\\Native Instruments\\\n"
-            "HKLM\\SOFTWARE\\WOW6432Node\\Native Instruments\\\n"
-            "HKCU\\Software\\Native Instruments\\"
-        )
-        reply = QMessageBox.information(
-            self, "注册表位置",
-            f"Kontakt 音色库注册表位置：\n\n{reg_paths_display}\n\n"
-            "注册表编辑器打开后，请手动导航到以上路径。\n"
-            "你可以在这里看到所有注册的音色库子键，\n右键删除不需要的子键即可清理。\n\n"
-            "是否打开注册表编辑器？",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes,
-        )
-        if reply == QMessageBox.Yes:
-            try:
-                subprocess.Popen(["regedit.exe"])
-            except OSError:
-                import ctypes
-                ctypes.windll.shell32.ShellExecuteW(None, "open", "regedit.exe", None, None, 1)
 
     def _on_rescan_patches(self):
         selected = self._table.currentRow()
