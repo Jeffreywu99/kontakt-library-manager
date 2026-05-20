@@ -278,3 +278,32 @@ class LibraryManager:
 
     def set_patch_notes(self, file_path: str, text: str) -> None:
         set_patch_notes(file_path, text)
+
+    def get_folder_size(self, path_str: str) -> float:
+        """Get total folder size in MB. Uses cache if available."""
+        if not path_str:
+            return 0.0
+        # Try cache first
+        for lib in self._libraries:
+            if lib.content_dir == path_str and hasattr(lib, '_cached_size_mb'):
+                return lib._cached_size_mb
+        p = Path(path_str)
+        if not p.is_dir():
+            return 0.0
+        total = 0
+        try:
+            for f in p.rglob("*"):
+                if f.is_file():
+                    try:
+                        total += f.stat().st_size
+                    except OSError:
+                        pass
+        except OSError:
+            return 0.0
+        size_mb = round(total / (1024 * 1024), 1)
+        # Cache on the library entry
+        for lib in self._libraries:
+            if lib.content_dir == path_str:
+                lib._cached_size_mb = size_mb
+                break
+        return size_mb

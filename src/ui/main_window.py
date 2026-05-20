@@ -30,6 +30,14 @@ class MainWindow(QMainWindow):
         self._manager = LibraryManager()
         self._current_patches: list[PatchEntry] = []
         self._current_patch_path: str = ""
+        self._selection_timer = QTimer()
+        self._selection_timer.setSingleShot(True)
+        self._selection_timer.setInterval(50)
+        self._selection_timer.timeout.connect(self._on_library_selected_debounced)
+        self._notes_timer = QTimer()
+        self._notes_timer.setSingleShot(True)
+        self._notes_timer.setInterval(300)
+        self._notes_timer.timeout.connect(self._on_notes_save)
         self._setup_window()
         self._setup_ui()
         self._setup_status()
@@ -72,11 +80,10 @@ class MainWindow(QMainWindow):
         self._folder_btn.clicked.connect(self._on_manage_folders)
         toolbar.addWidget(self._folder_btn)
 
-        toolbar.addSpacing(16)
-
-        self._rescan_btn = QPushButton("刷新音色扫描")
-        self._rescan_btn.clicked.connect(self._on_rescan_patches)
-        toolbar.addWidget(self._rescan_btn)
+        self._refresh_btn = QPushButton("刷新")
+        self._refresh_btn.setToolTip("重新扫描所有库文件夹")
+        self._refresh_btn.clicked.connect(self._on_refresh)
+        toolbar.addWidget(self._refresh_btn)
 
         toolbar.addStretch()
 
@@ -293,6 +300,9 @@ class MainWindow(QMainWindow):
         self._refresh_table()
 
     def _on_library_selected(self):
+        self._selection_timer.start()
+
+    def _on_library_selected_debounced(self):
         selected = self._table.currentRow()
         if selected < 0:
             return
@@ -304,11 +314,15 @@ class MainWindow(QMainWindow):
             return
 
         patches = self._manager.get_patches(lib.name)
-        total_size = sum(p.size_mb for p in patches)
+        folder_size = self._manager.get_folder_size(lib.content_dir)
+        if folder_size >= 1000:
+            size_str = f"{folder_size/1024:.1f} GB"
+        else:
+            size_str = f"{folder_size:.0f} MB"
         lib_type = TYPE_LABELS_FULL.get(lib.library_type, lib.library_type)
         info_lines = [
             f"<b style='color:#fff'>{lib.name}</b>",
-            f"<span style='color:#999;'>类型: {lib_type} · 音色数: {len(patches)} 个 · 大小: {total_size:.1f} MB</span>",
+            f"<span style='color:#999;'>类型: {lib_type} · 音色数: {len(patches)} 个 · 大小: {size_str}</span>",
             f"<span style='color:#999;'>路径: {lib.content_dir}</span>",
         ]
         if not lib.exists_on_disk:
@@ -392,15 +406,17 @@ class MainWindow(QMainWindow):
         self._patch_notes_edit.blockSignals(False)
 
     def _on_lib_notes_changed(self):
-        selected = self._table.currentRow()
-        if selected < 0:
-            return
-        name_item = self._table.item(selected, 0)
-        if not name_item:
-            return
-        self._manager.set_library_notes(name_item.text(), self._lib_notes_edit.toPlainText())
+        self._notes_timer.start()
 
     def _on_patch_notes_changed(self):
+        self._notes_timer.start()
+
+    def _on_notes_save(self):
+        selected = self._table.currentRow()
+        if selected >= 0:
+            name_item = self._table.item(selected, 0)
+            if name_item:
+                self._manager.set_library_notes(name_item.text(), self._lib_notes_edit.toPlainText())
         if hasattr(self, '_current_patch_path') and self._current_patch_path:
             self._manager.set_patch_notes(self._current_patch_path, self._patch_notes_edit.toPlainText())
 
@@ -566,15 +582,13 @@ class MainWindow(QMainWindow):
             msg += f"\n{len(errors)} 个失败:\n" + "\n".join(errors)
         self._status_label.setText(msg)
 
-    def _on_rescan_patches(self):
-        selected = self._table.currentRow()
-        if selected < 0:
-            QMessageBox.information(self, "提示", "请先选择一个音色库。")
-            return
-        name_item = self._table.item(selected, 0)
-        self._manager.get_patches(name_item.text(), force_rescan=True)
-        self._on_library_selected()
-        self._status_label.setText(f"已刷新 '{name_item.text()}' 的音色列表")
+    def _on_refresh(self):
+        self._manager.refresh()
+        self._refresh_category_list()
+        self._refresh_table()
+        self._patch_tree.clear()
+        self._patch_info.setText("选择一个库以查看详情")
+        self._status_label.setText("已刷新")
 
     def _on_manage_folders(self):
         dlg = FolderDialog(self._manager, self)

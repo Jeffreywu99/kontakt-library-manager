@@ -37,16 +37,17 @@ kontakt-library-manager/
 ## 架构设计
 
 - **分层**：UI (PySide6) → Manager (纯 Python) → Scanner / Registry / Files / Storage
-- **数据流**：Scanner 合并多个数据源 → Manager 缓存 → UI 展示
+- **数据流**：Scanner 扫描用户文件夹 → Manager 缓存 → UI 展示
 - **本地存储**：`%APPDATA%\KontaktLibraryManager\data.json`，独立于 Kontakt
-- **库来源优先级**：用户指定文件夹 > 手动添加 > 注册表（可开关）
+- **库来源**：仅用户指定的文件夹（标准 + 非标准），不扫描注册表
 
 ## 关键常量
 
 | 路径 | 用途 |
 |------|------|
-| `HKLM\SOFTWARE\Native Instruments\` | Kontakt 注册表主路径 |
+| `HKLM\SOFTWARE\Native Instruments\` | 添加/移除库时写入的注册表路径 |
 | `HKLM\SOFTWARE\WOW6432Node\Native Instruments\` | 32 位兼容路径 |
+| `HKCU\Software\Native Instruments\` | 当前用户注册表路径 |
 | `C:\Program Files\Common Files\Native Instruments\Service Center\` | XML 激活文件 |
 | `C:\Users\Public\Documents\Native Instruments\installed_products\` | K8 JSON 文件 |
 
@@ -61,8 +62,8 @@ kontakt-library-manager/
 ## 打包
 
 ```bash
-# 便携版
-pyinstaller --onefile --windowed --icon=icons/kontakt-library-manager.ico --name=KontaktLibraryManager --add-data="src;src" --hidden-import=PySide6.QtSvg --uac-admin main.pyw
+# 生成 spec 后，后续直接
+pyinstaller KontaktLibraryManager.spec
 
 # 安装包
 iscc setup.iss
