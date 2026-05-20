@@ -79,3 +79,54 @@ def remove_library(name: str) -> list[str]:
         except OSError:
             pass
     return failed
+
+
+def list_hkcu_display_entries() -> list[str]:
+    """Get HKCU entries that have UserListIndex (library display prefs, not ContentDir)."""
+    entries = []
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Native Instruments", 0, winreg.KEY_READ) as key:
+            i = 0
+            while True:
+                try:
+                    name = winreg.EnumKey(key, i)
+                    with winreg.OpenKey(key, name, 0, winreg.KEY_READ) as subkey:
+                        try:
+                            winreg.QueryValueEx(subkey, "UserListIndex")
+                            entries.append(name)
+                        except OSError:
+                            pass
+                    i += 1
+                except OSError:
+                    break
+    except OSError:
+        pass
+    return entries
+
+
+# Known NI application names — never clean these from HKCU
+_NI_APPS = {
+    "kontakt 5", "kontakt 6", "kontakt 7", "kontakt 8",
+    "kontakt factory library", "kontakt factory library 2",
+    "battery 4", "massive", "massive x", "fm8",
+    "guitar rig 6", "guitar rig 7", "super 8", "super 8 r2",
+    "native access", "shared", "alsupport", "reaktor", "reaktor 6",
+    "absynth", "absynth 5", "service center", "service center 2",
+}
+
+
+def cleanup_stale_hkcu(known_library_names: set[str]) -> int:
+    """Delete HKCU display entries for libraries that no longer exist in HKLM.
+    Skips known NI application names. Returns number of cleaned entries."""
+    hkcu_entries = list_hkcu_display_entries()
+    cleaned = 0
+    for name in hkcu_entries:
+        if name not in known_library_names and name.lower() not in _NI_APPS:
+            try:
+                winreg.DeleteKey(winreg.HKEY_CURRENT_USER,
+                                 f"Software\\Native Instruments\\{name}")
+                cleaned += 1
+            except OSError:
+                pass
+    return cleaned

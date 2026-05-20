@@ -81,6 +81,11 @@ class MainWindow(QMainWindow):
         self._regedit_btn.clicked.connect(self._on_open_regedit)
         toolbar.addWidget(self._regedit_btn)
 
+        self._cleanup_stale_btn = QPushButton("清理残留")
+        self._cleanup_stale_btn.setToolTip("一键删除注册表中存在但硬盘上已被删除的库")
+        self._cleanup_stale_btn.clicked.connect(self._on_cleanup_stale)
+        toolbar.addWidget(self._cleanup_stale_btn)
+
         self._rescan_btn = QPushButton("刷新音色扫描")
         self._rescan_btn.clicked.connect(self._on_rescan_patches)
         toolbar.addWidget(self._rescan_btn)
@@ -592,10 +597,36 @@ class MainWindow(QMainWindow):
             msg += f"\n{len(errors)} 个失败:\n" + "\n".join(errors)
         self._status_label.setText(msg)
 
+    def _on_cleanup_stale(self):
+        stale = self._manager.find_stale_registry_entries()
+        if not stale:
+            QMessageBox.information(self, "清理残留", "未发现残留注册表项。所有已注册的库文件均存在。")
+            return
+        names_display = "\n".join(f"  - {lib.name}" for lib in stale[:20])
+        extra = f"\n  ... 还有 {len(stale) - 20} 个" if len(stale) > 20 else ""
+        reply = QMessageBox.question(
+            self, "确认清理",
+            f"发现 {len(stale)} 个残留注册表项（硬盘文件已不存在）：\n\n"
+            f"{names_display}{extra}\n\n"
+            "将删除这些库的所有注册表项、XML 和 JSON 文件。\n确定清理？",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        success, fail = self._manager.cleanup_stale_entries()
+        self._refresh_category_list()
+        self._refresh_table()
+        msg = f"清理完成：成功 {success} 个"
+        if fail:
+            msg += f"，失败 {fail} 个"
+        self._status_label.setText(msg)
+        QMessageBox.information(self, "清理完成", msg)
+
     def _on_open_regedit(self):
         reg_paths_display = (
             "HKLM\\SOFTWARE\\Native Instruments\\\n"
-            "HKLM\\SOFTWARE\\WOW6432Node\\Native Instruments\\"
+            "HKLM\\SOFTWARE\\WOW6432Node\\Native Instruments\\\n"
+            "HKCU\\Software\\Native Instruments\\"
         )
         reply = QMessageBox.information(
             self, "注册表位置",
