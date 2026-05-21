@@ -12,13 +12,13 @@ from src.scanner import _dir_has_kontakt_content
 
 class ScanWorker(QThread):
     """Background thread to scan a root folder for Kontakt libraries."""
-    found = Signal(list)  # list of (name, path, has_content)
+    found = Signal(list)  # list of (name, path, has_content, is_registered)
 
-    def __init__(self, root_path: str):
+    def __init__(self, root_path: str, manager: LibraryManager):
         super().__init__()
         self.root_path = root_path
+        self._manager = manager
         self.setObjectName("ScanWorker")
-        # Ensure thread exits cleanly with the app
 
     def run(self):
         results = []
@@ -26,10 +26,26 @@ class ScanWorker(QThread):
         if not root.is_dir():
             self.found.emit(results)
             return
+
+        # Get all registered library paths for comparison
+        registered_dirs = set()
+        for lib in self._manager.libraries:
+            if lib.content_dir:
+                try:
+                    registered_dirs.add(str(Path(lib.content_dir).resolve()).lower())
+                except Exception:
+                    pass
+
         for subfolder in sorted(root.iterdir()):
             if subfolder.is_dir():
                 has_nicnt = _dir_has_kontakt_content(subfolder)
-                results.append((subfolder.name, str(subfolder), has_nicnt))
+                is_registered = False
+                if has_nicnt:
+                    try:
+                        is_registered = str(subfolder.resolve()).lower() in registered_dirs
+                    except Exception:
+                        pass
+                results.append((subfolder.name, str(subfolder), has_nicnt, is_registered))
         self.found.emit(results)
 
 
@@ -37,7 +53,6 @@ class BatchAddDialog(QDialog):
     def __init__(self, manager: LibraryManager, parent=None):
         super().__init__(parent)
         self._manager = manager
-        self._entries: list[tuple[str, str, bool]] = []
         self.setWindowTitle("批量入库")
         self.setMinimumSize(640, 480)
         self.resize(720, 540)
@@ -75,7 +90,7 @@ class BatchAddDialog(QDialog):
         self._tree.setColumnWidth(0, 40)
         self._tree.setColumnWidth(1, 220)
         self._tree.header().setStretchLastSection(True)
-        self._tree.itemClicked.connect(self._on_item_clicked)
+        self._tree.itemChanged.connect(self._on_item_changed)
         layout.addWidget(self._tree, 1)
 
         # Progress bar
@@ -112,23 +127,28 @@ class BatchAddDialog(QDialog):
 
         layout.addLayout(btn_layout)
 
-    def _on_item_clicked(self, item, col):
+    def _on_item_changed(self, item, col):
         if col == 0:
-            new_state = Qt.Unchecked if item.checkState(0) == Qt.Checked else Qt.Checked
-            item.setCheckState(0, new_state)
             self._update_count()
 
     def _set_all(self, state):
+        self._tree.blockSignals(True)
         for i in range(self._tree.topLevelItemCount()):
             item = self._tree.topLevelItem(i)
             item.setCheckState(0, state)
+        self._tree.blockSignals(False)
         self._update_count()
 
     def _update_count(self):
         checked = 0
-        total = self._tree.topLevelItemCount()
-        for i in range(total):
-            if self._tree.topLevelItem(i).checkState(0) == Qt.Checked:
+        total = 0
+        for i in range(self._tree.topLevelItemCount()):
+            item = self._tree.topLevelItem(i)
+            # Skip separator rows (disabled items)
+            if not (item.flags() & Qt.ItemIsEnabled):
+                continue
+            total += 1
+            if item.checkState(0) == Qt.Checked:
                 checked += 1
         self._stats.setText(f"已选 {checked} / {total} 个库")
         self._confirm_btn.setEnabled(checked > 0)
@@ -145,28 +165,67 @@ class BatchAddDialog(QDialog):
         self._tree.clear()
         self._stats.setText("扫描中...")
 
-        self._worker = ScanWorker(root)
+        self._worker = ScanWorker(root, self._manager)
         self._worker.found.connect(self._on_scan_done)
         self._worker.start()
 
     def _on_scan_done(self, results):
         self._tree.clear()
-        skipped = 0
-        for name, path, has_content in results:
-            if has_content:
-                item = QTreeWidgetItem(["", name, path])
-                item.setCheckState(0, Qt.Checked)
-                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-                self._tree.addTopLevelItem(item)
-                self._entries.append((name, path, True))
-            else:
-                skipped += 1
+        self._tree.blockSignals(True)
 
-        msg = f"找到 {len(results)} 个子文件夹"
-        if skipped:
-            msg += f"，{skipped} 个不含 Kontakt 文件（已跳过）"
-        self._stats.setText(msg)
+        new_libs = []  # Not registered yet
+        registered_libs = []  # Already registered
+        skipped_no_content = 0
+
+        for name, path, has_content, is_registered in results:
+            if has_content:
+                if is_registered:
+                    registered_libs.append((name, path))
+                else:
+                    new_libs.append((name, path))
+            else:
+                skipped_no_content += 1
+
+        # Add new libraries first (checked by default)
+        for name, path in new_libs:
+            item = QTreeWidgetItem(["", name, path])
+            item.setCheckState(0, Qt.Checked)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            self._tree.addTopLevelItem(item)
+
+        # Add separator if both types exist
+        if new_libs and registered_libs:
+            separator = QTreeWidgetItem(["", "--- 已入库 ---", ""])
+            separator.setFlags(separator.flags() & ~Qt.ItemIsSelectable & ~Qt.ItemIsEnabled)
+            separator.setForeground(1, Qt.gray)
+            self._tree.addTopLevelItem(separator)
+
+        # Add registered libraries (unchecked by default)
+        for name, path in registered_libs:
+            item = QTreeWidgetItem(["✓", name, path])
+            item.setCheckState(0, Qt.Unchecked)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setForeground(1, Qt.gray)
+            self._tree.addTopLevelItem(item)
+
+        self._tree.blockSignals(False)
+
+        # Build stats message
+        msg_parts = []
+        if new_libs:
+            msg_parts.append(f"{len(new_libs)} 个新库")
+        if registered_libs:
+            msg_parts.append(f"{len(registered_libs)} 个已入库")
+        if skipped_no_content:
+            msg_parts.append(f"{skipped_no_content} 个无 Kontakt 文件")
+
+        if msg_parts:
+            self._stats.setText("找到 " + "、".join(msg_parts))
+        else:
+            self._stats.setText("未找到有效的音色库")
+
         self._update_count()
+        self._scan_btn.setEnabled(True)
 
     def _on_confirm(self):
         entries: list[tuple[str, str]] = []

@@ -5,6 +5,7 @@ Windows 桌面应用，管理 Kontakt 8 音色库（BobDule 版本）。
 
 import sys
 import os
+import ctypes
 from pathlib import Path
 
 # Set working directory first
@@ -12,7 +13,42 @@ project_root = Path(__file__).resolve().parent
 os.chdir(str(project_root))
 
 
+def is_admin() -> bool:
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except Exception:
+        return False
+
+
+def run_as_admin():
+    """Re-run the script with admin privileges."""
+    if sys.executable.endswith("pythonw.exe"):
+        # Use pythonw.exe for no console
+        exe = sys.executable
+    else:
+        # Try to find pythonw.exe
+        exe = sys.executable.replace("python.exe", "pythonw.exe")
+        if not Path(exe).exists():
+            exe = sys.executable
+
+    script = str(Path(__file__).resolve())
+    params = f'"{script}"'
+
+    try:
+        ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", exe, params, str(project_root), 1
+        )
+    except Exception:
+        pass
+    sys.exit(0)
+
+
 def main():
+    # Check for admin privileges
+    if not is_admin():
+        run_as_admin()
+        return
+
     # Import Qt modules after setting working directory
     from PySide6.QtWidgets import QApplication, QSplashScreen
     from PySide6.QtGui import QPixmap, QColor, QPainter, QFont

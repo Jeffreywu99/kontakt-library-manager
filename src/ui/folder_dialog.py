@@ -1,11 +1,13 @@
 """Dialog for managing library folders (standard and non-standard)."""
 
+from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QListWidget, QListWidgetItem,
     QMessageBox, QLabel, QFileDialog, QGroupBox,
 )
 from PySide6.QtCore import Qt
 from src.manager import LibraryManager, LibraryManagerError
+from src.scanner import _dir_has_kontakt_content
 
 
 class FolderDialog(QDialog):
@@ -98,20 +100,134 @@ class FolderDialog(QDialog):
         folder = QFileDialog.getExistingDirectory(self, "选择标准库目录")
         if not folder:
             return
+
+        # Scan for unregistered libraries
+        unregistered = []
+        folder_path = Path(folder)
+        if folder_path.is_dir():
+            registered_dirs = set()
+            for lib in self._manager.libraries:
+                if lib.content_dir:
+                    try:
+                        registered_dirs.add(str(Path(lib.content_dir).resolve()).lower())
+                    except Exception:
+                        pass
+
+            for subfolder in folder_path.iterdir():
+                if subfolder.is_dir() and _dir_has_kontakt_content(subfolder):
+                    try:
+                        if str(subfolder.resolve()).lower() not in registered_dirs:
+                            unregistered.append(subfolder.name)
+                    except Exception:
+                        pass
+
+        # Add the folder first
         try:
             self._manager.add_folder(folder)
         except LibraryManagerError as e:
             QMessageBox.warning(self, "错误", str(e))
             return
+
+        # Ask if user wants to register unregistered libraries
+        if unregistered:
+            msg = f"发现 {len(unregistered)} 个未入库的音色库：\n\n"
+            msg += "\n".join(f"• {name}" for name in unregistered[:10])
+            if len(unregistered) > 10:
+                msg += f"\n... 等 {len(unregistered)} 个"
+            msg += "\n\n是否全部入库？"
+
+            reply = QMessageBox.question(
+                self, "发现未入库的音色库", msg,
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+            )
+
+            if reply == QMessageBox.Yes:
+                self._batch_add(folder, unregistered)
+
         self._refresh()
+
+    def _batch_add(self, folder: str, names: list[str]):
+        """Batch add libraries from the folder."""
+        folder_path = Path(folder)
+        success = 0
+        failed = []
+
+        for name in names:
+            subfolder = folder_path / name
+            if subfolder.is_dir():
+                try:
+                    self._manager.add_library(name, str(subfolder))
+                    success += 1
+                except LibraryManagerError as e:
+                    failed.append(f"{name}: {e}")
+
+        if success:
+            self._manager.refresh()
+
+        if failed:
+            QMessageBox.warning(
+                self, "入库结果",
+                f"成功 {success} 个，失败 {len(failed)} 个。\n\n" + "\n".join(failed[:5])
+            )
+        elif success:
+            QMessageBox.information(self, "入库完成", f"成功入库 {success} 个音色库。")
 
     def _remove_standard_folder(self):
         item = self._std_list.currentItem()
         if item is None:
             QMessageBox.information(self, "提示", "请先选择一个目录。")
             return
+
         path = item.data(Qt.UserRole)
+
+        # Count registered libraries in this folder
+        registered_count = 0
+        registered_names = []
+        folder_path = Path(path)
+        for lib in self._manager.libraries:
+            if lib.content_dir:
+                try:
+                    lib_dir = Path(lib.content_dir)
+                    if lib_dir.parent.resolve() == folder_path.resolve():
+                        if lib.found_in_registry or lib.found_in_xml or lib.found_in_json:
+                            registered_count += 1
+                            registered_names.append(lib.name)
+                except Exception:
+                    pass
+
+        # Ask user
+        msg = f"确定要移除目录吗？\n\n{path}"
+        if registered_count > 0:
+            msg += f"\n\n该目录中有 {registered_count} 个已入库的音色库。"
+            msg += "\n\n是否同时从 Kontakt 中移除？"
+
+            reply = QMessageBox.question(
+                self, "移除目录", msg,
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+                QMessageBox.Cancel
+            )
+
+            if reply == QMessageBox.Cancel:
+                return
+
+            # Remove from Kontakt first
+            if reply == QMessageBox.Yes:
+                for name in registered_names:
+                    try:
+                        self._manager.remove_library(name)
+                    except LibraryManagerError:
+                        pass
+        else:
+            reply = QMessageBox.question(
+                self, "移除目录", msg,
+                QMessageBox.Yes | QMessageBox.Cancel,
+                QMessageBox.Yes
+            )
+            if reply != QMessageBox.Yes:
+                return
+
         self._manager.remove_folder(path)
+        self._manager.refresh()
         self._refresh()
 
     def _add_nonstandard_folder(self):
@@ -130,6 +246,18 @@ class FolderDialog(QDialog):
         if item is None:
             QMessageBox.information(self, "提示", "请先选择一个目录。")
             return
+
         path = item.data(Qt.UserRole)
+
+        reply = QMessageBox.question(
+            self, "移除目录",
+            f"确定要移除非标准库目录吗？\n\n{path}\n\n这只会从软件中隐藏这些库，不会删除文件。",
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Yes
+        )
+
+        if reply != QMessageBox.Yes:
+            return
+
         self._manager.remove_nonstandard_folder(path)
         self._refresh()
