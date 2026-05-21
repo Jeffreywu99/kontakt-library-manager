@@ -45,6 +45,8 @@ from src.storage import (
     clear_patch_cache,
     get_nonstandard_libraries,
     update_nonstandard_library,
+    get_scan_cache,
+    clear_scan_cache,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,6 +77,23 @@ class LibraryManager:
         self._libraries = scan_all()
         self._patches_cache = {}
         return self._libraries
+
+    def force_full_scan(self) -> list[LibraryEntry]:
+        """Clear cache and perform a complete auto-discovery from registry."""
+        clear_scan_cache()
+        self._libraries = scan_all()
+        self._patches_cache = {}
+        return self._libraries
+
+    def get_scan_info(self) -> dict:
+        """Return information about the last scan."""
+        cache = get_scan_cache()
+        if not cache:
+            return {"last_scan": None, "library_count": 0}
+        return {
+            "last_scan": cache.get("last_full_scan", ""),
+            "library_count": len(cache.get("libraries", [])),
+        }
 
     # ---- Library Folders ----
 

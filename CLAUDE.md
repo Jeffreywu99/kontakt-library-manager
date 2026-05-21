@@ -43,7 +43,17 @@ kontakt-library-manager/
 
 ## 当前状态（2026-05-21）
 
-版本 v0.3.0。
+版本 v0.5.0。
+
+### v0.5.0 自动发现 + 增量扫描
+
+**核心改动**：
+- 从"文件夹驱动扫描"改为"注册表驱动发现"
+- 首次启动自动扫描注册表，显示所有已注册 Kontakt 音色库（零配置）
+- 精准识别规则：`Visibility=3` + `HU`(32位hex) + `JDX`(64位hex) ↔ 零误判
+- 扫描缓存（data.json `scan_cache`）→ 后续启动增量对比，毫秒级
+- 显示名称从 .nicnt `<Name>` 字段读取，与 Kontakt 内一致
+- 自动排除 Battery/MassiveX/Arturia/UAD/NKS 预设等非 Kontakt 条目
 
 ### v0.3.0 架构重构
 

@@ -6,6 +6,8 @@ class LibraryEntry:
     name: str
     content_dir: str
     snpid: str = ""
+    hu: str = ""
+    jdx: str = ""
     found_in_registry: bool = False
     found_in_xml: bool = False
     found_in_json: bool = False
@@ -17,6 +19,8 @@ class LibraryEntry:
     registry_paths: list[str] = field(default_factory=list)
     xml_path: str = ""
     json_path: str = ""
+    # v0.5.0: registry key name (may differ from display name, e.g. "Ashlight" vs "Ashlight Library")
+    reg_name: str = ""
 
 
 @dataclass

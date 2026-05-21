@@ -29,6 +29,7 @@ def _default_data() -> dict:
         "patch_notes": {},
         "patch_scan_cache": {},
         "nonstandard_libraries": [],
+        "scan_cache": None,  # v0.5.0: auto-discovered libraries cache
     }
 
 
@@ -300,4 +301,26 @@ def update_nonstandard_library(path: str, name: str | None = None, categories: l
 def remove_nonstandard_library(path: str) -> None:
     data = _load()
     data["nonstandard_libraries"] = [l for l in data["nonstandard_libraries"] if l.get("path") != path]
+    _save(data)
+
+
+# ---- Scan Cache (v0.5.0 auto-discovery) ----
+
+def get_scan_cache() -> dict | None:
+    """Return cached scan result or None if no cache exists."""
+    data = _load()
+    return data.get("scan_cache")
+
+
+def save_scan_cache(cache: dict) -> None:
+    """Save scan result cache (overwrites previous)."""
+    data = _load()
+    data["scan_cache"] = cache
+    _save(data)
+
+
+def clear_scan_cache() -> None:
+    """Clear scan cache, forcing a full re-scan on next refresh."""
+    data = _load()
+    data["scan_cache"] = None
     _save(data)

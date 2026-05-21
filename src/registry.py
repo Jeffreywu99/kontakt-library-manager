@@ -133,6 +133,104 @@ def remove_library(name: str) -> list[str]:
     return failed
 
 
+def _is_hex(s: str, expected_len: int = 0) -> bool:
+    """Check if string is a hex string of expected length."""
+    if not s:
+        return False
+    if expected_len and len(s) != expected_len:
+        return False
+    return all(c in "0123456789ABCDEFabcdef" for c in s)
+
+
+def _is_third_party_presets(content_dir: str) -> bool:
+    """Check if path matches known third-party NKS preset patterns."""
+    cd = content_dir.lower()
+    markers = [
+        r"\third party\native instruments\presets",   # Arturia
+        r"\universal audio\plug-ins",                 # UAD
+        r"\nks",                                       # NKS presets
+    ]
+    return any(m in cd for m in markers)
+
+
+def list_kontakt_libraries() -> list[dict]:
+    """List all Kontakt libraries from registry using the definitive rule:
+    Visibility=3 + HU (32-char hex) + JDX (64-char hex).
+
+    Returns a deduplicated list (by ContentDir) of dicts with keys:
+    name, content_dir, snpid, hu, jdx, content_version, visibility, source_paths.
+    """
+    result: dict[str, dict] = {}  # keyed by normalized content_dir
+    for base_key, reg_path, prefix in REG_ENTRIES:
+        try:
+            with winreg.OpenKey(base_key, reg_path, 0, winreg.KEY_READ) as key:
+                i = 0
+                while True:
+                    try:
+                        subkey_name = winreg.EnumKey(key, i)
+                    except OSError:
+                        break
+                    try:
+                        with winreg.OpenKey(key, subkey_name, 0, winreg.KEY_READ) as subkey:
+                            values = {}
+                            j = 0
+                            while True:
+                                try:
+                                    vn, vd, vt = winreg.EnumValue(subkey, j)
+                                    values[vn] = int(vd) if vt == winreg.REG_DWORD else str(vd)
+                                    j += 1
+                                except OSError:
+                                    break
+
+                            cd = values.get("ContentDir", "")
+                            vis = values.get("Visibility", 0)
+                            hu = values.get("HU", "")
+                            jdx = values.get("JDX", "")
+
+                            if not cd:
+                                i += 1
+                                continue
+                            if vis != 3:
+                                i += 1
+                                continue
+                            if not _is_hex(hu, 32):
+                                i += 1
+                                continue
+                            if not _is_hex(jdx, 64):
+                                i += 1
+                                continue
+                            if _is_third_party_presets(cd):
+                                i += 1
+                                continue
+
+                            normalized = str(Path(cd).resolve()).lower()
+                            if normalized in result:
+                                result[normalized]["source_paths"].append(
+                                    f"{prefix}\\{reg_path}\\{subkey_name}"
+                                )
+                                # Keep the name with more information (non-Library suffix etc.)
+                                existing = result[normalized]
+                                if len(subkey_name) > len(existing["name"]):
+                                    existing["name"] = subkey_name
+                            else:
+                                result[normalized] = {
+                                    "name": subkey_name,
+                                    "content_dir": cd,
+                                    "snpid": values.get("SNPID", ""),
+                                    "hu": hu,
+                                    "jdx": jdx,
+                                    "content_version": values.get("ContentVersion", ""),
+                                    "visibility": vis,
+                                    "source_paths": [f"{prefix}\\{reg_path}\\{subkey_name}"],
+                                }
+                    except OSError:
+                        pass
+                    i += 1
+        except OSError:
+            continue
+    return list(result.values())
+
+
 def read_registry_values(name: str) -> dict:
     """Read all values for a given library name from the registry.
 

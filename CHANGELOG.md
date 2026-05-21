@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.5.0] - 2026-05-21
+
+### Added
+- **首次启动自动发现**：首次打开软件自动扫描注册表，显示所有已注册的 Kontakt 音色库（Visibility=3 + HU + JDX），无需手动配置库文件夹
+- **增量扫描**：后续启动通过缓存对比注册表变化，毫秒级完成
+- **强制完整扫描**：刷新按钮右键菜单支持清除缓存并完整重建
+- **扫描缓存机制**：`data.json` 新增 `scan_cache` 持久化发现结果
+
+### Changed
+- **扫描逻辑重构**：从文件夹驱动改为注册表驱动
+  - `list_kontakt_libraries()` — 遍历三个注册表位置，三要素过滤，ContentDir 去重
+  - `auto_discover_all()` — 首次全量发现 + 自动提取库文件夹
+  - `scan_incremental()` — 增量对比缓存，检测新增/移除
+- **显示名称**：统一从 `.nicnt` 的 `<Name>` 字段读取，与 Kontakt 内显示一致
+- **状态栏**：显示库数量和上次扫描时间
+
+### Fixed
+- 不再误显示 Battery 4 Factory Library、Massive X Factory Library 等非 Kontakt 音色库
+- 自动排除路径含 `\Third Party\Native Instruments\presets` (Arturia)、`\Universal Audio\Plug-Ins\` (UAD)、`\NKS\` 等非 Kontakt 条目
+- ContentDir 去重解决同一库有多个注册表键名的问题
+
 ## [0.4.1] - 2026-05-21
 
 ### Fixed

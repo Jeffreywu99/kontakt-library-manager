@@ -89,8 +89,10 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self._folder_btn)
 
         self._refresh_btn = QPushButton("刷新")
-        self._refresh_btn.setToolTip("重新扫描所有注册信息")
+        self._refresh_btn.setToolTip("重新扫描注册信息\n右键: 强制完整扫描")
         self._refresh_btn.clicked.connect(self._on_refresh)
+        self._refresh_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._refresh_btn.customContextMenuRequested.connect(self._on_refresh_context_menu)
         toolbar.addWidget(self._refresh_btn)
 
         toolbar.addStretch()
@@ -219,13 +221,28 @@ class MainWindow(QMainWindow):
 
     def _on_initial_load(self):
         _ui_trace("_on_initial_load start")
+        self._status_label.setText("正在自动发现音色库...")
         try:
             self._manager.refresh()
-            _ui_trace(f"_on_initial_load refresh OK: {len(self._manager.libraries)} libs")
+            lib_count = len(self._manager.libraries)
+            scan_info = self._manager.get_scan_info()
+            last_scan = scan_info.get("last_scan", "")
+            if last_scan:
+                try:
+                    dt = datetime.fromisoformat(last_scan)
+                    scan_time = dt.strftime("%Y-%m-%d %H:%M")
+                except (ValueError, OSError):
+                    scan_time = last_scan[:19] if last_scan else ""
+            else:
+                scan_time = "首次"
+            _ui_trace(f"_on_initial_load refresh OK: {lib_count} libs, last_scan={scan_time}")
         except Exception as e:
             _ui_trace(f"_on_initial_load refresh ERROR: {e}")
+            lib_count = 0
+            scan_time = "失败"
         self._refresh_category_list()
         self._refresh_table()
+        self._status_label.setText(f"已发现 {lib_count} 个音色库 · 上次扫描: {scan_time}")
 
     def _refresh_category_list(self):
         self._category_list.blockSignals(True)
@@ -607,12 +624,64 @@ class MainWindow(QMainWindow):
         self._status_label.setText(msg)
 
     def _on_refresh(self):
-        self._manager.refresh()
+        self._status_label.setText("正在扫描音色库...")
+        try:
+            self._manager.refresh()
+        except Exception as e:
+            _ui_trace(f"_on_refresh ERROR: {e}")
         self._refresh_category_list()
         self._refresh_table()
         self._patch_tree.clear()
         self._patch_info.setText("选择一个库以查看详情")
-        self._status_label.setText("已刷新")
+        scan_info = self._manager.get_scan_info()
+        last_scan = scan_info.get("last_scan", "")
+        if last_scan:
+            try:
+                dt = datetime.fromisoformat(last_scan)
+                scan_time = dt.strftime("%Y-%m-%d %H:%M")
+            except (ValueError, OSError):
+                scan_time = ""
+        else:
+            scan_time = "未知"
+        self._status_label.setText(f"已刷新 · {scan_info.get('library_count', 0)} 个库 · 上次扫描: {scan_time}")
+
+    def _on_refresh_context_menu(self, pos):
+        menu = QMenu(self)
+        force_action = QAction("强制完整扫描（从注册表重新发现）", self)
+        force_action.triggered.connect(self._on_force_full_scan)
+        menu.addAction(force_action)
+        menu.exec(self._refresh_btn.mapToGlobal(pos))
+
+    def _on_force_full_scan(self):
+        reply = QMessageBox.question(
+            self, "强制完整扫描",
+            "将清除扫描缓存，从注册表完整重新发现所有音色库。\n确定继续？",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        self._status_label.setText("正在完整扫描注册表...")
+        try:
+            self._manager.force_full_scan()
+        except Exception as e:
+            _ui_trace(f"_on_force_full_scan ERROR: {e}")
+            QMessageBox.critical(self, "扫描失败", f"完整扫描失败: {e}")
+            return
+        self._refresh_category_list()
+        self._refresh_table()
+        self._patch_tree.clear()
+        self._patch_info.setText("选择一个库以查看详情")
+        scan_info = self._manager.get_scan_info()
+        last_scan = scan_info.get("last_scan", "")
+        if last_scan:
+            try:
+                dt = datetime.fromisoformat(last_scan)
+                scan_time = dt.strftime("%Y-%m-%d %H:%M")
+            except (ValueError, OSError):
+                scan_time = ""
+        else:
+            scan_time = "未知"
+        self._status_label.setText(f"完整扫描完成 · {scan_info.get('library_count', 0)} 个库 · {scan_time}")
 
     def _on_manage_folders(self):
         dlg = FolderDialog(self._manager, self)
