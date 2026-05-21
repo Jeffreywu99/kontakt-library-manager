@@ -74,18 +74,41 @@ def _get_registration_info() -> tuple[dict, dict, dict, dict, dict, dict]:
 
 
 def _find_registered_library_by_dir(content_dir: str, registry_map: dict, reg_sources: dict,
-                                     xml_data: dict, xml_sources: dict, json_data: dict, json_sources: dict) -> LibraryEntry | None:
-    """Find registration info for a library by its content directory."""
+                                     xml_data: dict, xml_sources: dict, json_data: dict, json_sources: dict,
+                                     nicnt_regkey: str = "") -> LibraryEntry | None:
+    """Find registration info for a library by its content directory.
+
+    If nicnt_regkey is provided (from .nicnt RegKey field), it is used to
+    precisely match the correct registry entry name, avoiding false matches
+    with legacy entries that use folder names instead of RegKey.
+    """
     target = str(Path(content_dir).resolve()).lower() if content_dir else ""
     if not target:
         return None
 
-    # Find by content_dir in registration data
     found_name = None
-    for name, cd in registry_map.items():
-        if cd and str(Path(cd).resolve()).lower() == target:
-            found_name = name
-            break
+
+    # If we have a RegKey from .nicnt, try to match it first across all sources
+    if nicnt_regkey:
+        if nicnt_regkey in registry_map:
+            cd = registry_map[nicnt_regkey]
+            if cd and str(Path(cd).resolve()).lower() == target:
+                found_name = nicnt_regkey
+        if not found_name and nicnt_regkey in xml_data:
+            cd = xml_data[nicnt_regkey].get("content_dir", "")
+            if cd and str(Path(cd).resolve()).lower() == target:
+                found_name = nicnt_regkey
+        if not found_name and nicnt_regkey in json_data:
+            cd = json_data[nicnt_regkey].get("content_dir", "")
+            if cd and str(Path(cd).resolve()).lower() == target:
+                found_name = nicnt_regkey
+
+    # Fall back to content_dir matching if RegKey didn't match
+    if not found_name:
+        for name, cd in registry_map.items():
+            if cd and str(Path(cd).resolve()).lower() == target:
+                found_name = name
+                break
     if not found_name:
         for name, info in xml_data.items():
             cd = info.get("content_dir", "")
@@ -151,9 +174,16 @@ def _scan_standard_folders(registry_map: dict, reg_sources: dict,
             if not _dir_has_kontakt_content(subfolder):
                 continue
 
+            # Extract RegKey from .nicnt for precise registry matching
+            nicnt_regkey = ""
+            if _dir_has_kontakt_content(subfolder):
+                nicnt_info = _extract_nicnt_info(subfolder)
+                nicnt_regkey = nicnt_info.get("regkey", "")
+
             # Find registration info
             entry = _find_registered_library_by_dir(
-                str(subfolder), registry_map, reg_sources, xml_data, xml_sources, json_data, json_sources
+                str(subfolder), registry_map, reg_sources, xml_data, xml_sources, json_data, json_sources,
+                nicnt_regkey=nicnt_regkey
             )
             if entry:
                 results.append(entry)

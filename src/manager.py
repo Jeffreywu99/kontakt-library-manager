@@ -167,14 +167,14 @@ class LibraryManager:
 
         folder_str = str(folder)
         try:
-            reg_add(reg_name, folder_str, snpid, hu=hu, jdx=jdx)
+            reg_add(reg_name, folder_str, hu=hu, jdx=jdx)
             _trace("add_library: reg_add OK")
         except OSError as e:
             _trace(f"add_library FAIL: reg_add error: {e}")
             raise LibraryManagerError(f"注册表写入失败: {e}")
 
         try:
-            create_xml(reg_name, folder_str, snpid, upid=upid, hu=hu, jdx=jdx,
+            create_xml(reg_name, upid=upid, snpid=snpid, hu=hu, jdx=jdx,
                        company=company, auth_system=auth_system, powered_by=powered_by)
             _trace("add_library: create_xml OK")
         except OSError as e:
@@ -182,7 +182,7 @@ class LibraryManager:
             raise LibraryManagerError(f"XML 文件创建失败（注册表已写入，请手动清理）。\n{e}")
 
         try:
-            create_json(reg_name, folder_str, snpid)
+            create_json(reg_name, folder_str)
             _trace("add_library: create_json OK")
         except OSError as e:
             _trace(f"add_library FAIL: create_json error: {e}")

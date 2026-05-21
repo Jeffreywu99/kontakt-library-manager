@@ -32,7 +32,6 @@ XML_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
       <Visibility type="Number">3</Visibility>
     </ProductSpecific>
     <Company>{company}</Company>
-    <ContentDir>{content_dir}</ContentDir>
   </Product>
 </ProductHints>"""
 
@@ -43,8 +42,51 @@ def _safe_filename(name: str) -> str:
     return name.translate(SANITIZE_CHARS).strip()
 
 
+def parse_xml_file(xml_path: str) -> dict:
+    """Parse a single XML file and return all product data as a dict."""
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+    product = root.find("Product")
+    if product is None:
+        return {}
+
+    def _text(tag: str) -> str:
+        el = product.find(tag)
+        return el.text.strip() if el is not None and el.text else ""
+
+    def _text_ps(tag: str) -> str:
+        ps = product.find("ProductSpecific")
+        if ps is None:
+            return ""
+        el = ps.find(tag)
+        return el.text.strip() if el is not None and el.text else ""
+
+    result: dict = {
+        "Name": _text("Name"),
+        "RegKey": _text("RegKey"),
+        "SNPID": _text("SNPID"),
+        "UPID": _text("UPID"),
+        "Type": _text("Type"),
+        "AuthSystem": _text("AuthSystem"),
+        "PoweredBy": _text("PoweredBy"),
+        "Company": _text("Company"),
+        "ContentDir": _text("ContentDir"),
+        "HU": _text_ps("HU"),
+        "JDX": _text_ps("JDX"),
+    }
+
+    # Parse Visibility from ProductSpecific (it's a number like "3")
+    vis_ps = _text_ps("Visibility")
+    if vis_ps and vis_ps.isdigit():
+        result["Visibility"] = int(vis_ps)
+    else:
+        result["Visibility"] = 3  # default
+
+    return result
+
+
 def list_from_xml() -> tuple[dict[str, dict], dict[str, str]]:
-    """Return (name->{snpid, content_dir}, name->xml_file_path)."""
+    """Return (name->{snpid, hu, jdx, content_dir}, name->xml_file_path)."""
     result: dict[str, dict] = {}
     sources: dict[str, str] = {}
     if not XML_DIR.is_dir():
@@ -59,13 +101,22 @@ def list_from_xml() -> tuple[dict[str, dict], dict[str, str]]:
             name_el = product.find("Name")
             cd_el = product.find("ContentDir")
             snpid_el = product.find("SNPID")
+            ps_el = product.find("ProductSpecific")
             if name_el is not None and name_el.text:
                 name = name_el.text.strip()
-                entry: dict = {"snpid": "", "content_dir": ""}
+                entry: dict = {"snpid": "", "hu": "", "jdx": "", "content_dir": ""}
                 if snpid_el is not None and snpid_el.text:
                     entry["snpid"] = snpid_el.text.strip()
                 if cd_el is not None and cd_el.text:
                     entry["content_dir"] = cd_el.text.strip()
+                # Parse HU and JDX from ProductSpecific
+                if ps_el is not None:
+                    hu_el = ps_el.find("HU")
+                    jdx_el = ps_el.find("JDX")
+                    if hu_el is not None and hu_el.text:
+                        entry["hu"] = hu_el.text.strip()
+                    if jdx_el is not None and jdx_el.text:
+                        entry["jdx"] = jdx_el.text.strip()
                 result[name] = entry
                 sources[name] = str(xml_file)
         except (ET.ParseError, OSError):
@@ -95,7 +146,7 @@ def list_from_json() -> tuple[dict[str, dict], dict[str, str]]:
     return result, sources
 
 
-def create_xml(name: str, content_dir: str, snpid: str = "",
+def create_xml(name: str, snpid: str = "",
                upid: str = "", hu: str = "", jdx: str = "",
                company: str = "", auth_system: str = "",
                powered_by: str = "") -> Path:
@@ -111,22 +162,19 @@ def create_xml(name: str, content_dir: str, snpid: str = "",
         hu=hu or "0" * 32,
         jdx=jdx or "0" * 64,
         company=company or "Unknown",
-        content_dir=content_dir,
     )
     with open(xml_path, "w", encoding="utf-8") as f:
         f.write(xml_content)
     return xml_path
 
 
-def create_json(name: str, content_dir: str, snpid: str = "") -> Path:
+def create_json(name: str, content_dir: str) -> Path:
     JSON_DIR.mkdir(parents=True, exist_ok=True)
     json_path = JSON_DIR / f"{name}.json"
     data: dict = {
         "ContentDir": content_dir,
         "ContentVersion": "1.0.0",
     }
-    if snpid:
-        data["SNPID"] = snpid
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
     return json_path

@@ -46,7 +46,7 @@ def list_libraries() -> tuple:
     return result, sources
 
 
-def add_library(name: str, content_dir: str, snpid: str = "",
+def add_library(name: str, content_dir: str,
                 hu: str = "", jdx: str = "") -> None:
     success_count = 0
     last_error = None
@@ -56,8 +56,6 @@ def add_library(name: str, content_dir: str, snpid: str = "",
                 winreg.SetValueEx(key, VALUE_NAME, 0, winreg.REG_SZ, content_dir)
                 winreg.SetValueEx(key, "Visibility", 0, winreg.REG_DWORD, 3)
                 winreg.SetValueEx(key, "ContentVersion", 0, winreg.REG_SZ, "1.0.0")
-                if snpid:
-                    winreg.SetValueEx(key, "SNPID", 0, winreg.REG_SZ, snpid)
                 if hu:
                     winreg.SetValueEx(key, "HU", 0, winreg.REG_SZ, hu)
                 if jdx:
@@ -133,3 +131,30 @@ def remove_library(name: str) -> list[str]:
         except OSError:
             pass
     return failed
+
+
+def read_registry_values(name: str) -> dict:
+    """Read all values for a given library name from the registry.
+
+    Returns a dict of {value_name: value, ...} for the first registry path
+    that contains the given name. Returns empty dict if not found.
+    """
+    for base_key, reg_path, _ in REG_ENTRIES:
+        try:
+            with winreg.OpenKey(base_key, f"{reg_path}\\{name}", 0, winreg.KEY_READ) as key:
+                values = {}
+                i = 0
+                while True:
+                    try:
+                        val_name, val_data, val_type = winreg.EnumValue(key, i)
+                        if val_type == winreg.REG_DWORD:
+                            values[val_name] = int(val_data)
+                        else:
+                            values[val_name] = str(val_data)
+                        i += 1
+                    except OSError:
+                        break
+                return values
+        except OSError:
+            continue
+    return {}
